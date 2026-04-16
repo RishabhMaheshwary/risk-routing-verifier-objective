@@ -1,0 +1,40 @@
+# Terminal-Bench Noisy Configuration
+# Used by generate_perturbations.py to produce perturbed training trajectories.
+defaults:
+  - ../base
+
+benchmark: terminalbench
+
+data:
+  num_perturbation_seeds: 20
+
+# Terminal-bench perturbations: focus on realistic shell task noise.
+# Prompt injection and distractors are lower priority (discuss with team).
+perturbations:
+  common:
+    tool_flakiness:
+      enabled: true
+      failure_prob: 0.10
+      timeout_prob: 0.05
+      stale_cache_prob: 0.05
+
+    partial_observability:
+      enabled: true
+      log_truncation_prob: 0.18
+      log_line_drop_prob: 0.12
+
+    prompt_injection:
+      enabled: false   # TODO: confirm with team
+
+    distractors:
+      enabled: false   # TODO: confirm with team
+
+  benchmark_specific:
+    terminalbench:
+      tool_flakiness:
+        failure_prob: 0.12   # flaky shell commands / network instability
+        timeout_prob: 0.08
+
+      partial_observability:
+        log_truncation_prob: 0.20  # truncated terminal output
+        log_line_drop_prob: 0.15
