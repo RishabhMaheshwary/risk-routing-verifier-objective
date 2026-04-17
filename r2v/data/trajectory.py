@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import hashlib
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
@@ -155,11 +155,12 @@ class Episode:
             obs = Observation(**s.pop("observation"))
             act = Action(**s.pop("action"))
             label = StepLabel(**s.pop("label")) if s.get("label") else None
+            _step_fields = {f.name for f in fields(Step)}
             steps.append(Step(
                 observation=obs, action=act, label=label,
                 action_source=ActionSource(s.pop("action_source")),
                 perturbation_type=PerturbationType(s.pop("perturbation_type", "none")),
-                **{k: v for k, v in s.items() if k not in ("observation", "action", "label")}
+                **{k: v for k, v in s.items() if k not in ("observation", "action", "label") and k in _step_fields}
             ))
         return cls(metadata=meta, steps=steps, **data)
 
