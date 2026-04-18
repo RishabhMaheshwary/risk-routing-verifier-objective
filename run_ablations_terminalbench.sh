@@ -98,11 +98,15 @@ declare -A HF_ID=(
     [qwen7]="Qwen/Qwen2.5-Coder-7B-Instruct"
     [qwen14]="Qwen/Qwen2.5-Coder-14B-Instruct"
     [llama]="meta-llama/Llama-3.1-8B-Instruct"
+    [gemma]="google/gemma-2-9b-it"
+    [deepseek]="deepseek-ai/deepseek-coder-6.7b-instruct"
 )
 declare -A BC_DIR_TAG=(
     [qwen7]="qwen_coder_7b"
     [qwen14]="qwen_coder_14b"
     [llama]="llama_3_1_8b_instruct"
+    [gemma]="gemma_2_9b_it"
+    [deepseek]="deepseek_coder_6_7b"
 )
 
 MODELS=(qwen7)
@@ -336,7 +340,7 @@ run_ablation_job() {
 
             # qwen14 needs keepalive to avoid GPU idle timeouts during long runs
             local gpu_keepalive="0"
-            [[ "${model_short}" == "qwen14" ]] && gpu_keepalive="0.2"
+            [[ "${model_short}" == "qwen14" || "${model_short}" == "gemma" ]] && gpu_keepalive="0.2"
 
             DPO_ARGS=(
                 scripts/train_policy.py

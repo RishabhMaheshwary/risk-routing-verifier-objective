@@ -117,6 +117,7 @@ declare -A HF_ID=(
     [qwen14]="Qwen/Qwen2.5-Coder-14B-Instruct"
     [llama]="meta-llama/Llama-3.1-8B-Instruct"
     [gemma]="google/gemma-2-9b-it"
+    [deepseek]="deepseek-ai/deepseek-coder-6.7b-instruct"
 )
 
 # Maps short name → directory tag used by run_bc_training.sh outputs
@@ -125,10 +126,11 @@ declare -A BC_DIR_TAG=(
     [qwen14]="qwen_coder_14b"
     [llama]="llama_3_1_8b_instruct"
     [gemma]="gemma_2_9b_it"
+    [deepseek]="deepseek_coder_6_7b"
 )
 
 if [[ -z "${HF_ID[${MODEL_SHORT}]+_}" ]]; then
-    echo "ERROR: Unknown model '${MODEL_SHORT}'.  Choose one of: qwen7  qwen14  llama  gemma"
+    echo "ERROR: Unknown model '${MODEL_SHORT}'.  Choose one of: qwen7  qwen14  llama  gemma  deepseek"
     exit 1
 fi
 
