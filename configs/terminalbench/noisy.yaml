@@ -8,6 +8,19 @@ benchmark: terminalbench
 data:
   num_perturbation_seeds: 20
 
+training:
+  bc:
+    epochs: 5
+    batch_size: 1
+    gradient_accumulation_steps: 8
+    learning_rate: 1.5e-4
+    warmup_ratio: 0.05
+  preference:
+    epochs: 3
+    batch_size: 4
+    gradient_accumulation_steps: 8
+    learning_rate: 5.0e-6
+
 # Terminal-bench perturbations: focus on realistic shell task noise.
 # Prompt injection and distractors are lower priority (discuss with team).
 perturbations:

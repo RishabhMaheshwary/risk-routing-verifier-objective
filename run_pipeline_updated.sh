@@ -40,7 +40,6 @@ cd "${SCRIPT_DIR}"
 # ── Defaults (override via flags or env vars) ─────────────────
 MODEL_SHORT="${MODEL_SHORT:-}"
 BENCHMARK="humaneval"
-CONFIG_NOISY="configs/${BENCHMARK}/noisy.yaml"
 NUM_GPUS="${NUM_GPUS:-2}"
 
 BC_EPOCHS="${BC_EPOCHS:-5}"
@@ -148,6 +147,7 @@ if [[ "${MODEL_SHORT}" == "qwen14" && "${DPO_GPU_KEEPALIVE_INTERVAL}" == "0" ]];
 fi
 
 # ── Derived paths (all tagged by model short name) ────────────
+CONFIG_NOISY="configs/${BENCHMARK}/noisy.yaml"
 SPLIT_DIR="data/trajectories/${BENCHMARK}_noisy"
 NOISY_TRAJECTORIES="${SPLIT_DIR}/trajectories.jsonl"
 BC_TRAIN_DATA="${SPLIT_DIR}/bc_train.jsonl"
