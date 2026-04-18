@@ -72,6 +72,5 @@ R2V_Agent/**
 proofs/
 
 .claude/**
-CLAUDE.md
 results/*
 logs/*
