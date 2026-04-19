@@ -44,17 +44,29 @@ echo "=== Launching ${NUM_GPUS} router-feature workers (${RUN_TAG}) ==="
 echo "Args: $@"
 echo ""
 
+# GPU_IDS env var overrides default 0..N-1 assignment (e.g. GPU_IDS=1,2,3,4)
+if [[ -n "${GPU_IDS:-}" ]]; then
+    IFS=',' read -r -a GPU_LIST <<< "${GPU_IDS}"
+    if [[ ${#GPU_LIST[@]} -ne ${NUM_GPUS} ]]; then
+        echo "ERROR: GPU_IDS has ${#GPU_LIST[@]} entries but NUM_GPUS=${NUM_GPUS}"
+        exit 1
+    fi
+else
+    GPU_LIST=()
+    for ((i=0; i<NUM_GPUS; i++)); do GPU_LIST+=("$i"); done
+fi
+
 PIDS=()
 for ((i=0; i<NUM_GPUS; i++)); do
     LOG="${RUN_TAG}_shard${i}.log"
-    echo "[GPU ${i}] Starting shard ${i}/${NUM_GPUS} -> ${LOG}"
-    CUDA_VISIBLE_DEVICES=${i} python "${GEN_SCRIPT}" \
+    echo "[GPU ${GPU_LIST[$i]}] Starting shard ${i}/${NUM_GPUS} -> ${LOG}"
+    CUDA_VISIBLE_DEVICES=${GPU_LIST[$i]} python "${GEN_SCRIPT}" \
         --shard-id ${i} \
         --num-shards ${NUM_GPUS} \
         "$@" \
         > "${LOG}" 2>&1 &
     PIDS+=($!)
-    echo "[GPU ${i}] PID=${PIDS[-1]}"
+    echo "[GPU ${GPU_LIST[$i]}] PID=${PIDS[-1]}"
 done
 
 echo ""

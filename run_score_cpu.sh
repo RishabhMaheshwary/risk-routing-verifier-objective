@@ -16,9 +16,10 @@
 # (candidate *.gen_cache.jsonl from generate-only is still reused).
 #
 # Usage:
-#   bash run_score_cpu.sh --model qwen7
-#   bash run_score_cpu.sh --model qwen7 --no-resume   # full re-score (ignore partial shard *.jsonl)
-#   bash run_score_cpu.sh --model llama --dry-run
+#   bash run_score_cpu.sh --model qwen7 --benchmark humaneval
+#   bash run_score_cpu.sh --model qwen7 --benchmark textworld
+#   bash run_score_cpu.sh --model qwen7 --benchmark humaneval --no-resume   # full re-score (ignore partial shard *.jsonl)
+#   bash run_score_cpu.sh --model llama --benchmark textworld --dry-run
 #   (Cache shard count is auto-detected from *.gen_cache.jsonl — no --gpus.)
 #
 # Models (--model):
@@ -40,7 +41,7 @@ cd "${SCRIPT_DIR}"
 
 # ── Defaults ─────────────────────────────────────────────────
 MODEL_SHORT=""
-BENCHMARK="humaneval"
+BENCHMARK=""
 ROUTER_BATCH_SIZE="${ROUTER_BATCH_SIZE:-32}"
 ROUTER_K="${ROUTER_K:-5}"
 DRY_RUN=false
@@ -50,6 +51,7 @@ NO_RESUME=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --model)       MODEL_SHORT="$2"; shift 2 ;;
+        --benchmark)   BENCHMARK="$2"; shift 2 ;;
         --gpus)        NUM_GPUS="$2"; shift 2 ;;
         --batch-size)  ROUTER_BATCH_SIZE="$2"; shift 2 ;;
         --dry-run)     DRY_RUN=true; shift ;;
@@ -67,6 +69,19 @@ if [[ -z "${MODEL_SHORT}" ]]; then
     exit 1
 fi
 
+if [[ -z "${BENCHMARK}" ]]; then
+    echo "ERROR: --benchmark is required. Choose one of: humaneval  textworld"
+    exit 1
+fi
+
+case "${BENCHMARK}" in
+    humaneval|textworld) ;;
+    *)
+        echo "ERROR: Unknown benchmark '${BENCHMARK}'. Choose one of: humaneval  textworld"
+        exit 1
+        ;;
+esac
+
 # ── Model registry (mirrors run_pipeline_updated.sh) ─────────
 declare -A HF_ID=(
     [qwen7]="Qwen/Qwen2.5-Coder-7B-Instruct"
@@ -82,7 +97,7 @@ fi
 
 MODEL_HF="${HF_ID[${MODEL_SHORT}]}"
 
-# ── Derived paths ────────────────────────────────────────────
+# ── Derived paths (benchmark-specific) ───────────────────────
 CONFIG_NOISY="configs/${BENCHMARK}/noisy.yaml"
 NOISY_TRAJECTORIES="data/trajectories/${BENCHMARK}_noisy/trajectories.jsonl"
 DPO_CHECKPOINT="outputs/policy/${BENCHMARK}_noisy_dpo_${MODEL_SHORT}/final"

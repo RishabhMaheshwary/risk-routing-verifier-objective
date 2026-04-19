@@ -45,6 +45,7 @@ import argparse
 import glob
 import json
 import math
+import os
 import sys
 import threading
 import time
@@ -326,6 +327,7 @@ def _init_vllm_backend(policy_cfg: dict, policy_path: str, logger):
     llm_kwargs: dict = {
         "model": str(policy_path),
         "trust_remote_code": True,
+        "gpu_memory_utilization": float(os.environ.get("VLLM_GPU_MEM_UTIL", "0.75")),
     }
 
     if is_lora_adapter:

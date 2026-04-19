@@ -55,13 +55,15 @@ else
     err "Config not found: $CONFIG"; ((ERRORS++))
 fi
 
-# 2. Policy checkpoint
+# 2. Policy checkpoint (local dir or HuggingFace model ID)
 if [[ -d "$POLICY_PATH" ]]; then
     ADAPTER_FILES=$(ls "$POLICY_PATH"/adapter_model* 2>/dev/null | wc -l)
     ok "Policy: $POLICY_PATH  (${ADAPTER_FILES} adapter file(s))"
     if [[ $ADAPTER_FILES -eq 0 ]]; then
         warn "No adapter_model* files — make sure the DPO checkpoint is complete"
     fi
+elif [[ "$POLICY_PATH" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9_./-]+$ ]]; then
+    ok "Policy: $POLICY_PATH  (HuggingFace model ID — will be downloaded at runtime)"
 else
     err "Policy dir not found: $POLICY_PATH"; ((ERRORS++))
 fi

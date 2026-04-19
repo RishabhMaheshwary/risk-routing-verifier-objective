@@ -40,6 +40,9 @@ data/raw/
 data/trajectories/
 data/processed/
 updated_data/
+!updated_data/router_features/*.jsonl
+!updated_data/router_features/manifest.json
+qwen*/
 *.tar.gz
 *.zip
 

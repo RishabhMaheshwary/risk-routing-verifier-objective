@@ -154,14 +154,39 @@ BC_TRAIN_DATA="${SPLIT_DIR}/bc_train.jsonl"
 BC_VAL_DATA="${SPLIT_DIR}/bc_val.jsonl"
 
 BC_OUTPUT="outputs/policy/${BENCHMARK}_noisy_bc_${MODEL_TAG}"
-# Prefer the BC "best/" checkpoint (lowest val loss). Fall back to "final/"
-# if best/ doesn't exist yet.
-BC_CHECKPOINT="${BC_OUTPUT}/best"
-BC_CHECKPOINT_FALLBACK="${BC_OUTPUT}/final"
-if [[ ! -d "${BC_CHECKPOINT}" && -d "${BC_CHECKPOINT_FALLBACK}" ]]; then
-    echo "  ⚠ BC best checkpoint not found; using final: ${BC_CHECKPOINT_FALLBACK}"
-    BC_CHECKPOINT="${BC_CHECKPOINT_FALLBACK}"
-fi
+# Prefer the BC "best/" checkpoint (lowest val loss).
+#
+# Note: `scripts/train_policy.py` writes BC checkpoints under:
+#   ${BC_OUTPUT}/bc_<model_type_tag>/{best,final}
+# Some older runs saved directly under:
+#   ${BC_OUTPUT}/{best,final}
+resolve_bc_checkpoint() {
+    BC_CHECKPOINT="${BC_OUTPUT}/best"
+    BC_CHECKPOINT_FALLBACK="${BC_OUTPUT}/final"
+
+    shopt -s nullglob
+    local nested_best=( "${BC_OUTPUT}"/bc_*/best )
+    local nested_final=( "${BC_OUTPUT}"/bc_*/final )
+    shopt -u nullglob
+
+    if [[ ! -d "${BC_CHECKPOINT}" ]]; then
+        # Use nested best if it exists.
+        if (( ${#nested_best[@]} > 0 )); then
+            BC_CHECKPOINT="${nested_best[0]}"
+        fi
+        # If neither direct best nor nested best exists, keep/try final.
+        if [[ ! -d "${BC_CHECKPOINT}" && ${#nested_final[@]} -gt 0 ]]; then
+            BC_CHECKPOINT_FALLBACK="${nested_final[0]}"
+        fi
+    fi
+
+    if [[ ! -d "${BC_CHECKPOINT}" && -d "${BC_CHECKPOINT_FALLBACK}" ]]; then
+        echo "  ⚠ BC best checkpoint not found; using final: ${BC_CHECKPOINT_FALLBACK}"
+        BC_CHECKPOINT="${BC_CHECKPOINT_FALLBACK}"
+    fi
+}
+
+resolve_bc_checkpoint
 
 CANDIDATES_FILE="data/candidates/${BENCHMARK}_noisy_dpo_prefs_heuristic_${MODEL_SHORT}.jsonl"
 
@@ -382,6 +407,9 @@ if should_run 1; then
             exit 1
         fi
     fi
+    # Re-resolve after training because BC checkpoints may be created in a
+    # nested bc_*/{best,final} directory during Stage 1.
+    resolve_bc_checkpoint
     echo "  ✓ BC done in $(( ELAPSED / 60 ))m $(( ELAPSED % 60 ))s"
     echo "  checkpoint: ${BC_CHECKPOINT}"
 fi

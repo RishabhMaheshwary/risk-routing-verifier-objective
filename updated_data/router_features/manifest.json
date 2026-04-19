@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-04-18",
+  "pipeline_mode": "no-training",
+  "model": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "model_short": "qwen7",
+  "quantization": "bf16",
+  "description": "Baseline router features using the raw base model (no BC or DPO training). Each record contains a 15-dim feature vector and verifier scores for one step in a trajectory.",
+  "schema": {
+    "episode_id": "string — unique trajectory identifier (e.g. 'HumanEval/0_seed1')",
+    "step_idx": "int — 0-based step index within the episode",
+    "features": "list[float] — 15-dimensional router feature vector (verifier signal, entropy, log-prob, consistency, spread, etc.)",
+    "slm_success": "float — heuristic verifier score for the SLM's chosen action (0.0 = fail, 1.0 = pass)",
+    "cost": "float — routing cost signal (higher = more expensive to route to LLM)"
+  },
+  "files": {
+    "humaneval_noisy_router_features_heuristic_qwen7_noTraining.jsonl": {
+      "benchmark": "humaneval",
+      "split": "noisy",
+      "records": 43200,
+      "size_mb": 13,
+      "source_machine": "skampere2.stanford.edu",
+      "gpu": "NVIDIA H200 (143GB)",
+      "episodes": 4920,
+      "steps_per_episode_avg": 8.78,
+      "K_candidates": 5,
+      "verifier": "heuristic (code execution)",
+      "phase1_batches": 1350,
+      "phase1_duration_min": 480.6,
+      "theory_checks": {
+        "note": "Base model with no training — theory checks indicate weak signal as expected",
+        "v_score_mean": 0.349,
+        "v_score_spread_mean": 0.343,
+        "logprob_mean": -16.978,
+        "consistency_mean": 0.733,
+        "entropy_check": "FAIL (base model assigns similar entropy to correct and incorrect steps)",
+        "v_mean_check": "OK",
+        "spread_check": "FAIL",
+        "consistency_check": "OK",
+        "logprob_check": "OK"
+      }
+    },
+    "textworld_noisy_router_features_heuristic_qwen7_noTraining.jsonl": {
+      "benchmark": "textworld",
+      "split": "noisy",
+      "records": 51798,
+      "size_mb": 15,
+      "source_machine": "hyperturing1.stanford.edu",
+      "gpu": "4x Quadro RTX 8000 (45GB each), shards 0-3 on GPUs 2,3,4,7",
+      "episodes": 7500,
+      "K_candidates": 5,
+      "verifier": "heuristic (textworld game engine)",
+      "phase1_shards": 4,
+      "phase1_duration_min_approx": 210,
+      "theory_checks": {
+        "note": "Base model baseline — 4/5 theory checks passing",
+        "v_score_mean": 0.700,
+        "v_score_spread_mean": 0.300,
+        "entropy_check": "OK",
+        "v_mean_check": "OK",
+        "spread_check": "OK",
+        "consistency_check": "OK",
+        "logprob_check": "FAIL"
+      }
+    }
+  }
+}
