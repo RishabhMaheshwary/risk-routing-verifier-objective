@@ -89,12 +89,16 @@ declare -A HF_ID=(
     [qwen7]="Qwen/Qwen2.5-Coder-7B-Instruct"
     [qwen14]="Qwen/Qwen2.5-Coder-14B-Instruct"
     [llama]="meta-llama/Llama-3.1-8B-Instruct"
+    [deepseek]="deepseek-ai/deepseek-coder-6.7b-instruct"
+    [gemma]="google/gemma-2-9b-it"
 )
 
 declare -A BC_DIR_TAG=(
     [qwen7]="qwen_coder_7b"
     [qwen14]="qwen_coder_14b"
     [llama]="llama_3_1_8b_instruct"
+    [deepseek]="deepseek_coder_6_7b"
+    [gemma]="gemma_2_9b_it"
 )
 
 MODELS=(qwen7)
@@ -157,7 +161,7 @@ resolve_dpo_checkpoint() {
 # ── Filter models/benchmarks ────────────────────────────────
 if [[ -n "${FILTER_MODEL}" ]]; then
     if [[ -z "${HF_ID[${FILTER_MODEL}]+_}" ]]; then
-        echo "ERROR: Unknown model '${FILTER_MODEL}'. Choose: qwen7, qwen14, llama"
+        echo "ERROR: Unknown model '${FILTER_MODEL}'. Choose: qwen7, qwen14, llama, deepseek, gemma"
         exit 1
     fi
     MODELS=("${FILTER_MODEL}")
@@ -270,13 +274,14 @@ for MODEL_SHORT in "${MODELS[@]}"; do
 
     for BENCH in "${BENCHMARKS[@]}"; do
         CONFIG_NOISY="configs/${BENCH}/noisy.yaml"
-        SPLIT_DIR="updated_data/trajectories/${BENCH}_noisy"
-        NOISY_TRAJECTORIES="${SPLIT_DIR}/trajectories.jsonl"
+        SPLIT_DIR="${PREF_SPLIT_DIR:-updated_data/trajectories/${BENCH}_noisy}"
+        NOISY_TRAJECTORIES="${NOISY_TRAJECTORIES_OVERRIDE:-updated_data/trajectories/${BENCH}_noisy/trajectories.jsonl}"
 
         # Locate existing BC checkpoint (reused; we do NOT run BC here).
-        # Flat layout: safetensors, tokenizer, etc. live directly in BC_OUTPUT.
-        BC_OUTPUT="${MODEL_SHORT}_${BENCH}"
-        BC_CHECKPOINT="${BC_OUTPUT}"
+        BC_CHECKPOINT="outputs/policy/${BENCH}_noisy_bc_${BC_DIR_TAG[${MODEL_SHORT}]}/best"
+        if [[ ! -d "${BC_CHECKPOINT}" ]]; then
+            BC_CHECKPOINT="outputs/policy/${BENCH}_noisy_bc_${BC_DIR_TAG[${MODEL_SHORT}]}/final"
+        fi
 
         PREF_PREFIX="pref_${MODEL_SHORT}"
         PREF_TRAIN_DATA="${SPLIT_DIR}/${PREF_PREFIX}_train.jsonl"

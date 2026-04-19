@@ -44,6 +44,7 @@ cd "${SCRIPT_DIR}"
 TOTAL_GPUS="${TOTAL_GPUS:-4}"
 GPUS_PER_JOB="${GPUS_PER_JOB:-1}"          # GPUs each DPO job uses
 FILTER_MODEL=""
+FILTER_MODELS=()                            # multi-model override (--models m1 m2 ...)
 FILTER_ABLATION="all"
 DRY_RUN=false
 SKIP_DPO=false
@@ -61,8 +62,8 @@ ROUTER_K="${ROUTER_K:-5}"
 
 BENCH="terminalbench"
 CONFIG_NOISY="configs/terminalbench/noisy.yaml"
-SPLIT_DIR="updated_data/trajectories/terminalbench_noisy"
-NOISY_TRAJECTORIES="${SPLIT_DIR}/trajectories.jsonl"
+SPLIT_DIR="${SPLIT_DIR:-updated_data/trajectories/terminalbench_noisy}"
+NOISY_TRAJECTORIES="${NOISY_TRAJECTORIES:-${SPLIT_DIR}/trajectories.jsonl}"
 
 QUANT_OVERRIDE="policy.quantization.load_in_4bit=false"
 COMMON_OVERRIDES="logging.wandb_mode=disabled"
@@ -73,6 +74,9 @@ while [[ $# -gt 0 ]]; do
         --gpus)             TOTAL_GPUS="$2";    shift 2 ;;
         --gpus-per-job)     GPUS_PER_JOB="$2";  shift 2 ;;
         --model)            FILTER_MODEL="$2";   shift 2 ;;
+        --models)           shift; while [[ $# -gt 0 && "$1" != --* ]]; do FILTER_MODELS+=("$1"); shift; done ;;
+        --split-dir)        SPLIT_DIR="$2";      shift 2 ;;
+        --trajectories)     NOISY_TRAJECTORIES="$2"; shift 2 ;;
         --ablation)         FILTER_ABLATION="$2"; shift 2 ;;
         --dpo-batch-size)   DPO_BATCH_SIZE="$2"; shift 2 ;;
         --dpo-grad-accum)   DPO_GRAD_ACCUM="$2"; shift 2 ;;
@@ -110,7 +114,12 @@ declare -A BC_DIR_TAG=(
 )
 
 MODELS=(qwen7)
-if [[ -n "${FILTER_MODEL}" ]]; then
+if [[ ${#FILTER_MODELS[@]} -gt 0 ]]; then
+    for _m in "${FILTER_MODELS[@]}"; do
+        [[ -z "${HF_ID[${_m}]+_}" ]] && { echo "ERROR: Unknown model '${_m}'"; exit 1; }
+    done
+    MODELS=("${FILTER_MODELS[@]}")
+elif [[ -n "${FILTER_MODEL}" ]]; then
     [[ -z "${HF_ID[${FILTER_MODEL}]+_}" ]] && { echo "ERROR: Unknown model '${FILTER_MODEL}'"; exit 1; }
     MODELS=("${FILTER_MODEL}")
 fi
@@ -360,11 +369,25 @@ run_ablation_job() {
                     "training.preference.concat_pairs=false"
                     "training.preference.gpu_keepalive_interval=${gpu_keepalive}"
             )
-            # skip-bc: DPO from base model directly (no BC init)
+            # Ablation overrides and model-specific guards must all go BEFORE
+            # --resume so they remain part of --overrides [nargs=*] for argparse.
+            for ov in ${abl_overrides}; do DPO_ARGS+=("${ov}"); done
+
+            # qwen14: large vocab (151k) OOM guards.
+            # 1. Always disable reference model (copy.deepcopy dequantizes ~29 GB).
+            # 2. If this ablation turns consistency ON, override it off (6× vocab tensors OOM).
+            if [[ "${model_short}" == "qwen14" ]]; then
+                DPO_ARGS+=("training.preference.use_reference_model=false")
+                if [[ "${abl_overrides}" == *"consistency.enabled=true"* ]]; then
+                    DPO_ARGS+=("training.consistency.enabled=false")
+                    echo "[WARN] qwen14 lambda ablation: overriding consistency.enabled=false (vocab OOM guard)"
+                fi
+            fi
+
+            # --resume must come after all --overrides values
             if [[ "${SKIP_BC}" == false ]]; then
                 DPO_ARGS+=(--resume "${bc_checkpoint}")
             fi
-            for ov in ${abl_overrides}; do DPO_ARGS+=("${ov}"); done
 
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
             local dpo_rc=0
@@ -472,8 +495,9 @@ run_ablation_job() {
     fi
 
     } 2>&1 | tee "${logfile}"
+    local pipe_rc=${PIPESTATUS[0]}
 
-    return ${overall_rc}
+    return ${pipe_rc}
 }
 
 # ── Build job list ────────────────────────────────────────────────

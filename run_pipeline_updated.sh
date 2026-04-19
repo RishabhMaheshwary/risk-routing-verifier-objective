@@ -458,6 +458,30 @@ if should_run 2; then
         PREF_ARGS+=(--no-consistency-pairs)
     fi
 
+    # FlashInfer (used by vLLM for some models, e.g. gemma-2) JIT-compiles
+    # attention kernels and needs CUDA_HOME with nvcc + headers. On clusters
+    # without /usr/local/cuda, point to a stub we built from conda packages.
+    if [[ -z "${CUDA_HOME:-}" ]]; then
+        _cuda_stub="${SCRIPT_DIR:-$(cd "$(dirname "$0")" && pwd)}/cuda_home"
+        _cuda_stub="$(cd "${_cuda_stub}" 2>/dev/null && pwd || true)"
+        if [[ -x "${_cuda_stub}/bin/nvcc" ]]; then
+            export CUDA_HOME="${_cuda_stub}"
+            export PATH="${_cuda_stub}/bin:${PATH}"
+        fi
+    fi
+
+    # Triton JIT-compiles CUDA kernels via a C compiler; ensure CC is set to
+    # a full absolute path so worker subprocesses find it regardless of PATH.
+    # Priority: existing CC > /usr/bin/gcc (full path, bypasses PATH lookup)
+    if [[ -z "${CC:-}" ]]; then
+        if [[ -x "/usr/bin/gcc" ]]; then
+            export CC="/usr/bin/gcc"
+        else
+            _gcc=$(command -v gcc 2>/dev/null || true)
+            export CC="${_gcc:-gcc}"
+        fi
+    fi
+
     START_T=$(date +%s)
     PREF_RC=0
     run_cmd "Collect preferences: ${MODEL_SHORT} (heuristic verifier, K=${PREF_K})" \
@@ -495,6 +519,30 @@ if should_run 3; then
 
     LOGFILE="${LOGDIR}/dpo_${BENCHMARK}_${MODEL_SHORT}.log"
 
+    # qwen14 (14B) needs 4-bit loading for DPO: the policy + frozen reference
+    # model together exceed 80 GB HBM in bf16. Other models are fine in bf16.
+    DPO_QUANT_OVERRIDE="${QUANT_OVERRIDE}"
+    if [[ "${MODEL_SHORT}" == "qwen14" ]]; then
+        DPO_QUANT_OVERRIDE="policy.quantization.load_in_4bit=true"
+    fi
+
+    # Large-vocab models accumulate huge logits tensors during DPO.
+    # Consistency JSD creates 6× (batch, seq, vocab) tensors simultaneously:
+    #   qwen14: seq=4096, vocab=151936 → ~12 GB; plus deepcopy of 4-bit ref
+    #           may dequantize to bf16 (~29 GB) → 71 GiB OOM observed.
+    #   gemma:  seq=4096, vocab=256000 → ~20 GB for consistency alone.
+    # Fix: disable consistency for these two models.  qwen14 also drops the
+    # reference model to avoid the bf16-deepcopy memory spike.
+    DPO_EXTRA_OVERRIDES=()
+    if [[ "${MODEL_SHORT}" == "qwen14" ]]; then
+        DPO_EXTRA_OVERRIDES+=(
+            "training.consistency.enabled=false"
+            "training.preference.use_reference_model=false"
+        )
+    elif [[ "${MODEL_SHORT}" == "gemma" ]]; then
+        DPO_EXTRA_OVERRIDES+=("training.consistency.enabled=false")
+    fi
+
     DPO_ARGS=(
         scripts/train_policy.py
         --config "${CONFIG_NOISY}"
@@ -504,7 +552,7 @@ if should_run 3; then
         --pref-train-data "${PREF_TRAIN_DATA}"
         --pref-val-data "${PREF_VAL_HALF_DATA}"
         --overrides
-            "${QUANT_OVERRIDE}"
+            "${DPO_QUANT_OVERRIDE}"
             "${COMMON_OVERRIDES}"
             "policy.model_name=${MODEL_HF}"
             "policy.lora.r=${LORA_R}"
@@ -516,8 +564,12 @@ if should_run 3; then
     )
     [[ -n "${DPO_EPOCHS}" ]] && DPO_ARGS+=("training.preference.epochs=${DPO_EPOCHS}")
     [[ -n "${DPO_BETA}" ]]   && DPO_ARGS+=("training.preference.beta=${DPO_BETA}")
+    [[ ${#DPO_EXTRA_OVERRIDES[@]} -gt 0 ]] && DPO_ARGS+=("${DPO_EXTRA_OVERRIDES[@]}")
 
     export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    # DeepSpeed checks CUDA_HOME at import time; skip the check when nvcc is
+    # absent (runtime-only CUDA install) — torch.cuda still works fine.
+    export DS_IGNORE_CUDA_DETECTION=1
 
     START_T=$(date +%s)
     DPO_RC=0

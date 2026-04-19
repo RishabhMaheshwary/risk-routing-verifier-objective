@@ -146,8 +146,8 @@ else
     echo -e "  GPUs / launch: ${NUM_GPUS}"
 fi
 
-# Verifier override: force heuristic mode
-VERIFIER_OVERRIDE="verifier.mode=heuristic verifier.heuristic.run_code=true verifier.heuristic.benchmark=${BENCHMARK:-humaneval}"
+# Verifier override: force heuristic mode (env var VERIFIER_OVERRIDE takes precedence)
+VERIFIER_OVERRIDE="${VERIFIER_OVERRIDE:-verifier.mode=heuristic verifier.heuristic.run_code=true verifier.heuristic.benchmark=${BENCHMARK:-humaneval}}"
 EXTRA_OVERRIDES="${EXTRA_OVERRIDES:-}"
 
 # ── Sanity probe: load 1 trajectory and print stats ──────────

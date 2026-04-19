@@ -41,7 +41,7 @@ cd "${SCRIPT_DIR}"
 
 # ── Defaults ─────────────────────────────────────────────────
 MODEL_SHORT=""
-BENCHMARK=""
+BENCHMARK="${BENCHMARK:-humaneval}"
 ROUTER_BATCH_SIZE="${ROUTER_BATCH_SIZE:-32}"
 ROUTER_K="${ROUTER_K:-5}"
 DRY_RUN=false
@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${MODEL_SHORT}" ]]; then
-    echo "ERROR: --model is required.  Choose one of: qwen7  qwen14  llama  gemma"
+    echo "ERROR: --model is required.  Choose one of: qwen7  qwen14  llama  gemma  deepseek"
     exit 1
 fi
 
@@ -88,10 +88,11 @@ declare -A HF_ID=(
     [qwen14]="Qwen/Qwen2.5-Coder-14B-Instruct"
     [llama]="meta-llama/Llama-3.1-8B-Instruct"
     [gemma]="google/gemma-2-9b-it"
+    [deepseek]="deepseek-ai/deepseek-coder-6.7b-instruct"
 )
 
 if [[ -z "${HF_ID[${MODEL_SHORT}]+_}" ]]; then
-    echo "ERROR: Unknown model '${MODEL_SHORT}'.  Choose one of: qwen7  qwen14  llama  gemma"
+    echo "ERROR: Unknown model '${MODEL_SHORT}'.  Choose one of: qwen7  qwen14  llama  gemma  deepseek"
     exit 1
 fi
 
@@ -130,6 +131,13 @@ export BATCH_SIZE="${ROUTER_BATCH_SIZE}"
 export SCORE_ONLY="true"
 export EXTRA_OVERRIDES="policy.model_name=${MODEL_HF}"
 [[ "${NO_RESUME}" == true ]] && export ROUTER_NO_RESUME="true"
+
+# For benchmarks without a create_labeler() implementation (e.g. terminalbench),
+# fall back to humaneval verifier with run_code=false so scoring doesn't error.
+# Policy-based features (entropy, log-prob, step counts) are benchmark-agnostic.
+if [[ "${BENCHMARK}" != "humaneval" && "${BENCHMARK}" != "textworld" ]]; then
+    export VERIFIER_OVERRIDE="verifier.mode=heuristic verifier.heuristic.run_code=false verifier.heuristic.benchmark=humaneval"
+fi
 
 DRY_FLAG=""
 [[ ${DRY_RUN} == true ]] && DRY_FLAG="--dry-run"
