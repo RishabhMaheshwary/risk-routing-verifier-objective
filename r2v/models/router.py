@@ -68,7 +68,9 @@ class Router(nn.Module):
         self.temperature = nn.Parameter(torch.ones(1))
 
         # Lagrange multiplier for CVaR constraint (learned during training)
-        self.log_lambda = nn.Parameter(torch.zeros(1))
+        # Start higher so the constraint is competitive with cost gradient from epoch 1.
+        log_lambda_init = float(config.get("log_lambda_init", 1.5))
+        self.log_lambda = nn.Parameter(torch.full((1,), log_lambda_init))
 
         logger.info(
             f"Router initialized: input_dim={input_dim}, "
@@ -295,7 +297,7 @@ class TemperatureScaling:
                 labels * np.log(probs) + (1 - labels) * np.log(1 - probs)
             )
 
-        result = minimize_scalar(nll, bounds=(0.01, 10.0), method="bounded")
+        result = minimize_scalar(nll, bounds=(0.01, 5.0), method="bounded")
         self.temperature = result.x
         logger.info(f"Calibration temperature: {self.temperature:.4f}")
 

@@ -1,0 +1,17 @@
+method,benchmark,condition,seed,success_rate,success_rate_ci,worst_seed_sr,cvar_failure,bottom_10_sr,avg_cost,avg_latency,llm_call_rate,safety_failure_rate,ece,brier
+r2v,textworld,noisy,0,0.9107,"[0.897, 0.925]",0.9107,0.0893,,122.4480,,0.1912,,0.2965,0.2866
+slm_only,textworld,noisy,0,0.6440,"[0.622, 0.668]",0.6440,0.3560,,17.0000,,0.0000,,,
+llm_only,textworld,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,850.0000,,1.0000,,,
+entropy_router,textworld,noisy,0,0.6440,"[0.622, 0.668]",0.6440,0.3560,,17.1307,,0.0002,,,
+r2v,textworld,noisy,0,0.9107,"[0.897, 0.925]",,,,122.4480,,0.1912,,,
+slm_only,textworld,noisy,0,0.6440,"[0.622, 0.668]",,,,17.0000,,0.0000,,,
+llm_only,textworld,noisy,0,1.0000,"[1.000, 1.000]",,,,850.0000,,1.0000,,,
+entropy_router,textworld,noisy,0,0.6440,"[0.622, 0.668]",,,,17.1307,,0.0002,,,
+r2v,textworld,noisy,0,0.9107,"[0.897, 0.925]",0.9107,0.0893,,122.4480,,0.1912,,0.2965,0.2866
+slm_only,textworld,noisy,0,0.6440,"[0.622, 0.668]",0.6440,0.3560,,17.0000,,0.0000,,,
+llm_only,textworld,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,850.0000,,1.0000,,,
+entropy_router,textworld,noisy,0,0.6440,"[0.622, 0.668]",0.6440,0.3560,,17.1307,,0.0002,,,
+r2v,textworld,noisy,0,0.9107,"[0.897, 0.925]",,,,122.4480,,0.1912,,,
+slm_only,textworld,noisy,0,0.6440,"[0.622, 0.668]",,,,17.0000,,0.0000,,,
+llm_only,textworld,noisy,0,1.0000,"[1.000, 1.000]",,,,850.0000,,1.0000,,,
+entropy_router,textworld,noisy,0,0.6440,"[0.622, 0.668]",,,,17.1307,,0.0002,,,

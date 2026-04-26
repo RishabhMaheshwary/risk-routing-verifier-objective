@@ -1,0 +1,13 @@
+method,benchmark,condition,seed,success_rate,success_rate_ci,worst_seed_sr,cvar_failure,bottom_10_sr,avg_cost,avg_latency,llm_call_rate,safety_failure_rate,ece,brier
+r2v,textworld,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,19.1361,,0.0000,,0.2319,0.0555
+slm_only,textworld,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,19.1361,,0.0000,,,
+llm_only,textworld,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,956.8063,,1.0000,,,
+entropy_router,textworld,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,19.1361,,0.0000,,,
+oracle_router,textworld,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,19.1361,,0.0000,,,
+heuristic_router,textworld,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,908.1483,,0.9046,,,
+r2v,textworld,noisy,0,1.0000,"[1.000, 1.000]",,,,19.1361,,0.0000,,,
+slm_only,textworld,noisy,0,1.0000,"[1.000, 1.000]",,,,19.1361,,0.0000,,,
+llm_only,textworld,noisy,0,1.0000,"[1.000, 1.000]",,,,956.8063,,1.0000,,,
+entropy_router,textworld,noisy,0,1.0000,"[1.000, 1.000]",,,,19.1361,,0.0000,,,
+oracle_router,textworld,noisy,0,1.0000,"[1.000, 1.000]",,,,19.1361,,0.0000,,,
+heuristic_router,textworld,noisy,0,1.0000,"[1.000, 1.000]",,,,908.1483,,0.9046,,,

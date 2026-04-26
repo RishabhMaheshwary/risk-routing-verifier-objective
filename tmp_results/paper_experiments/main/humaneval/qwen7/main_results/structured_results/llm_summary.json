@@ -1,0 +1,154 @@
+{
+  "generated_at": "2026-04-25T23:00:50.915704",
+  "num_experiments": 1,
+  "main_results": [
+    {
+      "method": "r2v",
+      "benchmark": "humaneval",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 0.918918918918919,
+      "std_sr": 0.0,
+      "min_sr": 0.918918918918919,
+      "max_sr": 0.918918918918919,
+      "avg_cost": 10.891891891891891,
+      "avg_safety_failure_rate": null
+    },
+    {
+      "method": "slm_only",
+      "benchmark": "humaneval",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 0.918918918918919,
+      "std_sr": 0.0,
+      "min_sr": 0.918918918918919,
+      "max_sr": 0.918918918918919,
+      "avg_cost": 10.891891891891891,
+      "avg_safety_failure_rate": null
+    },
+    {
+      "method": "llm_only",
+      "benchmark": "humaneval",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 1.0,
+      "std_sr": 0.0,
+      "min_sr": 1.0,
+      "max_sr": 1.0,
+      "avg_cost": 544.5945945945946,
+      "avg_safety_failure_rate": null
+    },
+    {
+      "method": "entropy_router",
+      "benchmark": "humaneval",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 0.9594594594594594,
+      "std_sr": 0.0,
+      "min_sr": 0.9594594594594594,
+      "max_sr": 0.9594594594594594,
+      "avg_cost": 32.3018018018018,
+      "avg_safety_failure_rate": null
+    },
+    {
+      "method": "oracle_router",
+      "benchmark": "humaneval",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 1.0,
+      "std_sr": 0.0,
+      "min_sr": 1.0,
+      "max_sr": 1.0,
+      "avg_cost": 76.22522522522523,
+      "avg_safety_failure_rate": null
+    },
+    {
+      "method": "heuristic_router",
+      "benchmark": "humaneval",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 0.987987987987988,
+      "std_sr": 0.0,
+      "min_sr": 0.987987987987988,
+      "max_sr": 0.987987987987988,
+      "avg_cost": 87.62912912912913,
+      "avg_safety_failure_rate": null
+    }
+  ],
+  "comparisons": [
+    {
+      "method_a": "r2v",
+      "method_b": "slm_only",
+      "metric": "success_rate",
+      "benchmark": "humaneval",
+      "difference": 0.0,
+      "ci": [
+        0.0,
+        0.0
+      ],
+      "p_value": 1.0,
+      "significant": false
+    },
+    {
+      "method_a": "r2v",
+      "method_b": "llm_only",
+      "metric": "success_rate",
+      "benchmark": "humaneval",
+      "difference": -0.08108108108108103,
+      "ci": [
+        -0.1006381381381381,
+        -0.06156156156156156
+      ],
+      "p_value": 5.497824417943775e-13,
+      "significant": true
+    },
+    {
+      "method_a": "r2v",
+      "method_b": "entropy_router",
+      "metric": "success_rate",
+      "benchmark": "humaneval",
+      "difference": -0.04054054054054046,
+      "ci": [
+        -0.05555555555555555,
+        -0.02702702702702703
+      ],
+      "p_value": 5.623957756162312e-07,
+      "significant": true
+    },
+    {
+      "method_a": "r2v",
+      "method_b": "oracle_router",
+      "metric": "success_rate",
+      "benchmark": "humaneval",
+      "difference": -0.08108108108108103,
+      "ci": [
+        -0.1006381381381381,
+        -0.06156156156156156
+      ],
+      "p_value": 5.497824417943775e-13,
+      "significant": true
+    },
+    {
+      "method_a": "r2v",
+      "method_b": "heuristic_router",
+      "metric": "success_rate",
+      "benchmark": "humaneval",
+      "difference": -0.06906906906906907,
+      "ci": [
+        -0.08858858858858859,
+        -0.05105105105105105
+      ],
+      "p_value": 3.247491164870553e-11,
+      "significant": true
+    }
+  ],
+  "ablations": [],
+  "key_findings": [
+    "r2v achieves 91.9% SR on humaneval (noisy)",
+    "slm_only achieves 91.9% SR on humaneval (noisy)",
+    "llm_only achieves 100.0% SR on humaneval (noisy)",
+    "entropy_router achieves 95.9% SR on humaneval (noisy)",
+    "oracle_router achieves 100.0% SR on humaneval (noisy)",
+    "heuristic_router achieves 98.8% SR on humaneval (noisy)"
+  ]
+}

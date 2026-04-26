@@ -1,0 +1,25 @@
+\begin{table}[t]
+\centering
+\caption{Main results across benchmarks and conditions.}
+\label{tab:main-results}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccc}
+\toprule
+Method & Bench & Cond & SR$\uparrow$ & Worst-Seed$\uparrow$ & CVaR-Fail$\downarrow$ & Cost$\downarrow$ & Safety$\downarrow$ & ECE$\downarrow$ \\
+\midrule
+entropy_router & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & -- \\
+llm_only & textworld & noisy & 1.000 & 1.000 & 0.000 & 956.81 & -- & -- \\
+oracle_router & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & -- \\
+r2v@0.1 & textworld & noisy & 1.000 & 1.000 & 0.000 & 918.92 & -- & 0.223 \\
+r2v@0.2 & textworld & noisy & 1.000 & 1.000 & 0.000 & 774.75 & -- & 0.223 \\
+r2v@0.3 & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & 0.223 \\
+r2v@0.4 & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & 0.223 \\
+r2v@0.5 & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & 0.223 \\
+r2v@0.6 & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & 0.223 \\
+r2v@0.7 & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & 0.223 \\
+r2v@0.8 & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & 0.223 \\
+r2v@0.9 & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & 0.223 \\
+slm_only & textworld & noisy & 1.000 & 1.000 & 0.000 & 19.14 & -- & -- \\
+\bottomrule
+\end{tabular}}
+\end{table}

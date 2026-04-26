@@ -1,0 +1,9 @@
+method,benchmark,condition,seed,success_rate,success_rate_ci,worst_seed_sr,cvar_failure,bottom_10_sr,avg_cost,avg_latency,llm_call_rate,safety_failure_rate,ece,brier
+r2v,humaneval,noisy,0,0.9204,"[0.899, 0.940]",0.9204,0.0796,,42.1607,,0.1030,,0.3677,0.2530
+slm_only,humaneval,noisy,0,0.9189,"[0.898, 0.938]",0.9189,0.0811,,10.8919,,0.0000,,,
+llm_only,humaneval,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,544.5946,,1.0000,,,
+entropy_router,humaneval,noisy,0,0.9189,"[0.898, 0.938]",0.9189,0.0811,,10.8919,,0.0000,,,
+r2v,humaneval,noisy,0,0.9204,"[0.899, 0.940]",,,,42.1607,,0.1030,,,
+slm_only,humaneval,noisy,0,0.9189,"[0.898, 0.938]",,,,10.8919,,0.0000,,,
+llm_only,humaneval,noisy,0,1.0000,"[1.000, 1.000]",,,,544.5946,,1.0000,,,
+entropy_router,humaneval,noisy,0,0.9189,"[0.898, 0.938]",,,,10.8919,,0.0000,,,

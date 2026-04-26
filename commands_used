@@ -121,6 +121,11 @@ bash scripts/launch_router_features.sh 4 \
     verifier.mode=trained \
     logging.wandb_mode=disabled
 
+python scripts/build_router_dataset.py \
+  --features-root router_features_data \
+  --output data/router_dataset/unified_router_features.parquet \
+  > logs/run_evaluation/build_router_dataset_regen.log 2>&1
+
 python scripts/train_router.py \
   --config configs/humaneval/noisy.yaml \
   --features data/router_features_old/humaneval_noisy_heuristic_qwen.jsonl \
@@ -139,3 +144,8 @@ python scripts/evaluate.py \
   --output outputs/eval/humaneval_noisy_threshold_sweep \
   --methods r2v slm_only llm_only entropy_router \
   --router-threshold-sweep 0.04 0.05 0.06 0.07 0.08 0.09 0.10 0.105 0.11 0.115 0.12
+
+cd /mnt/c/Users/rhvam/Desktop/not_os/NYU/projects/risk-routing-verifier-objective
+source exports.sh   # sets HF_TOKEN from .env
+
+bash scripts/run_paper_experiments.sh --parallel-jobs 4 --skip-phase 1

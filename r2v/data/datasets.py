@@ -516,26 +516,39 @@ class RouterDataset(Dataset):
         mean: Optional[np.ndarray] = None,
         std: Optional[np.ndarray] = None,
     ):
-        self.examples = examples
         feats = np.array([e.features for e in examples], dtype=np.float32)
-        # Compute normalization stats from this dataset, or accept externally
-        # supplied stats (val/test sets must use training-set stats).
         self.mean: np.ndarray = mean if mean is not None else feats.mean(axis=0)
         self.std: np.ndarray = std if std is not None else feats.std(axis=0).clip(min=1e-6)
 
+        # Pre-normalise the whole matrix once at construction time so that
+        # __getitem__ is a zero-cost tensor slice instead of per-sample arithmetic.
+        normed = (feats - self.mean) / self.std
+        self._features = torch.from_numpy(normed)
+        self._labels   = torch.tensor([e.label for e in examples],              dtype=torch.float32)
+        self._success  = torch.tensor([e.success for e in examples],            dtype=torch.float32)
+        self._seeds    = torch.tensor([e.perturbation_seed for e in examples],  dtype=torch.long)
+        self._costs    = torch.tensor([e.cost for e in examples],               dtype=torch.float32)
+
     def __len__(self) -> int:
-        return len(self.examples)
+        return len(self._features)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        ex = self.examples[idx]
-        normed = (np.array(ex.features, dtype=np.float32) - self.mean) / self.std
         return {
-            "features": torch.tensor(normed, dtype=torch.float32),
-            "label": torch.tensor(ex.label, dtype=torch.float32),
-            "success": torch.tensor(ex.success, dtype=torch.float32),
-            "perturbation_seed": torch.tensor(ex.perturbation_seed, dtype=torch.long),
-            "cost": torch.tensor(ex.cost, dtype=torch.float32),
+            "features":          self._features[idx],
+            "label":             self._labels[idx],
+            "success":           self._success[idx],
+            "perturbation_seed": self._seeds[idx],
+            "cost":              self._costs[idx],
         }
+
+    def to(self, device: torch.device) -> "RouterDataset":
+        """Move all pre-computed tensors to *device* (e.g. GPU) in-place."""
+        self._features = self._features.to(device)
+        self._labels   = self._labels.to(device)
+        self._success  = self._success.to(device)
+        self._seeds    = self._seeds.to(device)
+        self._costs    = self._costs.to(device)
+        return self
 
     @classmethod
     def from_episodes(

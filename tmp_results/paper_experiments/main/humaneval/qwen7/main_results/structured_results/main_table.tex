@@ -1,0 +1,18 @@
+\begin{table}[t]
+\centering
+\caption{Main results across benchmarks and conditions.}
+\label{tab:main-results}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccc}
+\toprule
+Method & Bench & Cond & SR$\uparrow$ & Worst-Seed$\uparrow$ & CVaR-Fail$\downarrow$ & Cost$\downarrow$ & Safety$\downarrow$ & ECE$\downarrow$ \\
+\midrule
+entropy_router & humaneval & noisy & 0.959 & 0.959 & 0.041 & 32.30 & -- & -- \\
+heuristic_router & humaneval & noisy & 0.988 & 0.988 & 0.012 & 87.63 & -- & -- \\
+llm_only & humaneval & noisy & 1.000 & 1.000 & 0.000 & 544.59 & -- & -- \\
+oracle_router & humaneval & noisy & 1.000 & 1.000 & 0.000 & 76.23 & -- & -- \\
+r2v & humaneval & noisy & 0.919 & 0.919 & 0.081 & 10.89 & -- & 0.169 \\
+slm_only & humaneval & noisy & 0.919 & 0.919 & 0.081 & 10.89 & -- & -- \\
+\bottomrule
+\end{tabular}}
+\end{table}

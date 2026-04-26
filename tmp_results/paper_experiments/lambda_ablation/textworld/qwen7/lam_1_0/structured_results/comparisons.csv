@@ -1,0 +1,7 @@
+method_a,method_b,benchmark,condition,metric,value_a,value_b,difference,ci_lower,ci_upper,p_value,significant,effect_size,test_name
+r2v,slm_only,textworld,noisy,success_rate,0.8226666666666667,0.644,0.17866666666666664,0.15933333333333333,0.2,0.0,True,,mcnemar
+r2v,llm_only,textworld,noisy,success_rate,0.8226666666666667,1.0,-0.17733333333333334,-0.196,-0.15733333333333333,0.0,True,,mcnemar
+r2v,entropy_router,textworld,noisy,success_rate,0.8226666666666667,0.644,0.17866666666666664,0.15933333333333333,0.2,0.0,True,,mcnemar
+r2v,slm_only,textworld,noisy,success_rate,0.8226666666666667,0.644,0.17866666666666664,0.15933333333333333,0.2,0.0,True,,mcnemar
+r2v,llm_only,textworld,noisy,success_rate,0.8226666666666667,1.0,-0.17733333333333334,-0.196,-0.15733333333333333,0.0,True,,mcnemar
+r2v,entropy_router,textworld,noisy,success_rate,0.8226666666666667,0.644,0.17866666666666664,0.15933333333333333,0.2,0.0,True,,mcnemar

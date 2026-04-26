@@ -719,14 +719,16 @@ def main():
     benchmark = args.heuristic_benchmark
     if benchmark is None and isinstance(heuristic_cfg, dict):
         cfg_benchmark = heuristic_cfg.get("benchmark")
-        if isinstance(cfg_benchmark, str) and cfg_benchmark.lower() in {"humaneval", "textworld"}:
+        if isinstance(cfg_benchmark, str) and cfg_benchmark.lower() in {
+            "humaneval", "textworld", "terminalbench"
+        }:
             benchmark = cfg_benchmark.lower()
 
     if benchmark is None:
         cfg_top_benchmark = str(cfg.get("benchmark", "")).lower()
         if cfg_top_benchmark == "alfworld":
             benchmark = "textworld"
-        elif cfg_top_benchmark in {"humaneval", "textworld"}:
+        elif cfg_top_benchmark in {"humaneval", "textworld", "terminalbench"}:
             benchmark = cfg_top_benchmark
 
     run_code = not args.no_run_code

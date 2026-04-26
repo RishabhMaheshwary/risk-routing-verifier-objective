@@ -847,6 +847,7 @@ def _score_and_assemble(
             "cost": item["cost"],
             "episode_id": item["episode_id"],
             "step_idx": item["step_idx"],
+            "verifier_scores": [float(s) for s in all_scores[i]],
             "_entropy": entropies[i],
             "_v_mean": float(np.mean(all_scores[i])),
             "_v_spread": max(all_scores[i]) - min(all_scores[i]),

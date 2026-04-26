@@ -1,0 +1,16 @@
+\begin{table}[t]
+\centering
+\caption{Main results across benchmarks and conditions.}
+\label{tab:main-results}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccc}
+\toprule
+Method & Bench & Cond & SR$\uparrow$ & Worst-Seed$\uparrow$ & CVaR-Fail$\downarrow$ & Cost$\downarrow$ & Safety$\downarrow$ & ECE$\downarrow$ \\
+\midrule
+entropy_router & textworld & noisy & 0.681 & 0.681 & 0.319 & 20.30 & -- & -- \\
+llm_only & textworld & noisy & 1.000 & 1.000 & 0.000 & 850.00 & -- & -- \\
+r2v & textworld & noisy & 0.920 & 0.920 & 0.080 & 163.71 & -- & 0.270 \\
+slm_only & textworld & noisy & 0.647 & 0.647 & 0.353 & 17.00 & -- & -- \\
+\bottomrule
+\end{tabular}}
+\end{table}

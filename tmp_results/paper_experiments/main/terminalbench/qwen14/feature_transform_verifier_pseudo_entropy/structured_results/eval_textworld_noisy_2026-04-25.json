@@ -1,0 +1,302 @@
+{
+  "experiment_name": "eval_textworld_noisy",
+  "timestamp": "2026-04-25T23:12:53.758299",
+  "config": {
+    "project": {
+      "name": "r2v-agent",
+      "seed": 42,
+      "output_dir": "experiments/results",
+      "checkpoint_dir": "experiments/checkpoints",
+      "log_dir": "experiments/logs"
+    },
+    "policy": {
+      "model_name": "Qwen/Qwen2.5-Coder-7B-Instruct",
+      "max_seq_len": 4096,
+      "lora": {
+        "enabled": true,
+        "r": 32,
+        "alpha": 64,
+        "dropout": 0.1,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj"
+        ]
+      },
+      "quantization": {
+        "load_in_4bit": false,
+        "bnb_4bit_compute_dtype": "bfloat16",
+        "bnb_4bit_quant_type": "nf4"
+      }
+    },
+    "teacher": {
+      "provider": "openai",
+      "model_name": "gpt-4o",
+      "max_seq_len": 8192,
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "system_prompt": ""
+    },
+    "verifier": {
+      "mode": "llm_judge",
+      "llm_judge": {
+        "model_name": "meta-llama/Llama-3.1-70B-Instruct"
+      },
+      "trained": {
+        "backbone": "/scratch/rh3884/humaira/risk-routing-verifier-objective/outputs/merged/qwen_coder_7b",
+        "freeze_backbone": true,
+        "pool_last_k_tokens": null,
+        "gradient_checkpointing": true,
+        "lora": {
+          "enabled": false,
+          "r": 16,
+          "alpha": 32,
+          "dropout": 0.05,
+          "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj"
+          ]
+        },
+        "hidden_dim": 1024,
+        "num_layers": 2,
+        "dropout": 0.1
+      },
+      "multitask": {
+        "step_weight": 0.3,
+        "final_weight": 1.0
+      }
+    },
+    "router": {
+      "input_features": {
+        "policy_hidden_dim": 256,
+        "verifier_score": true,
+        "entropy": true,
+        "step_number": true,
+        "token_count": true
+      },
+      "hidden_dims": [
+        128,
+        64
+      ],
+      "dropout": 0.2,
+      "calibration": {
+        "temperature_scaling": true,
+        "num_bins": 15
+      }
+    },
+    "training": {
+      "bc": {
+        "epochs": 3,
+        "batch_size": 1,
+        "gradient_accumulation_steps": 8,
+        "learning_rate": 0.00015,
+        "weight_decay": 0.01,
+        "warmup_ratio": 0.05,
+        "max_grad_norm": 1.0,
+        "scheduler": "cosine"
+      },
+      "preference": {
+        "enabled": true,
+        "beta": 0.1,
+        "num_candidates": 8,
+        "epochs": 3,
+        "batch_size": 4,
+        "gradient_accumulation_steps": 8,
+        "learning_rate": 5e-06
+      },
+      "consistency": {
+        "enabled": true,
+        "lambda_cons": 0.1,
+        "num_tool_seeds": 2,
+        "temperature": 2.0
+      },
+      "verifier": {
+        "epochs": 5,
+        "batch_size": 8,
+        "gradient_accumulation_steps": 4,
+        "learning_rate": 1e-05,
+        "weight_decay": 0.01,
+        "auto_class_balance": true,
+        "positive_class_weight": null,
+        "max_class_weight": 5.0,
+        "use_focal_loss": true,
+        "focal_gamma": 2.0,
+        "focal_alpha": 0.22,
+        "use_ldam": true,
+        "ldam_C": 0.5,
+        "decision_threshold": 0.5,
+        "tune_threshold_on_val": true
+      },
+      "router": {
+        "epochs": 20,
+        "batch_size": 4096,
+        "learning_rate": 0.001,
+        "weight_decay": 0.0001,
+        "robust_objective": "cvar",
+        "cvar_alpha": 0.2,
+        "cvar_epsilon": 0.3,
+        "lagrangian_lr": 0.01,
+        "brier_weight": 1.0,
+        "temperature_scaling": true,
+        "cost_slm": 1.0,
+        "cost_llm": 50.0
+      },
+      "lambda_pref": 0.5,
+      "lambda_cons": 0.1
+    },
+    "data": {
+      "num_teacher_trajectories": 250,
+      "num_perturbation_seeds": 20,
+      "train_ratio": 0.7,
+      "max_perturbations_per_task": 2,
+      "num_candidates_per_step": 8,
+      "max_episode_steps": 30
+    },
+    "perturbations": {
+      "tool_flakiness": {
+        "enabled": true,
+        "failure_prob": 0.1,
+        "timeout_prob": 0.05,
+        "stale_cache_prob": 0.1,
+        "result_shuffle_prob": 0.2,
+        "partial_response_prob": 0.1,
+        "result_drop_fraction": [
+          0.1,
+          0.5
+        ]
+      },
+      "partial_observability": {
+        "enabled": true,
+        "dom_hide_prob": 0.15,
+        "dom_reorder_prob": 0.1,
+        "attribute_strip_prob": 0.1,
+        "log_truncation_prob": 0.2,
+        "log_line_drop_prob": 0.15,
+        "info_mask_prob": 0.05,
+        "stacktrace_truncation_prob": 0.15
+      },
+      "prompt_injection": {
+        "enabled": true,
+        "direct_injection_prob": 0.15,
+        "indirect_injection_prob": 0.1,
+        "goal_hijack_prob": 0.05,
+        "exfiltration_attempt_prob": 0.05,
+        "role_confusion_prob": 0.05,
+        "encoded_injection_prob": 0.03,
+        "misleading_error_prob": 0.15,
+        "misleading_comment_prob": 0.1
+      },
+      "distractors": {
+        "enabled": true,
+        "semantic_distractor_prob": 0.15,
+        "red_herring_prob": 0.15,
+        "decoy_element_prob": 0.1,
+        "plausible_wrong_prob": 0.1,
+        "plausible_wrong_fix_prob": 0.15,
+        "decoy_error_prob": 0.1
+      }
+    },
+    "inference": {
+      "num_candidates": 4,
+      "max_self_correct_iters": 2,
+      "accept_threshold": 0.7,
+      "max_llm_calls": 10,
+      "step_limit": 100
+    },
+    "evaluation": {
+      "num_perturbation_seeds": 20,
+      "num_bootstrap_samples": 1000,
+      "confidence_level": 0.95,
+      "cvar_alpha": 0.2,
+      "mcnemar_significance": 0.05
+    },
+    "compute": {
+      "num_gpus": 4,
+      "precision": "bf16",
+      "deepspeed_stage": 2,
+      "gradient_checkpointing": true,
+      "flash_attention": true
+    },
+    "logging": {
+      "use_wandb": true,
+      "wandb_project": "r2v-agent",
+      "wandb_entity": null,
+      "log_interval": 10,
+      "eval_interval": 100,
+      "save_interval": 500,
+      "wandb_mode": "disabled"
+    },
+    "benchmark": "textworld",
+    "textworld": {
+      "dataset": {
+        "name": "textworld",
+        "split": "test",
+        "max_instances": null
+      },
+      "cmd_timeout": 30,
+      "test_timeout": 60
+    }
+  },
+  "training_curves": {},
+  "eval_results": [
+    {
+      "method": "r2v",
+      "benchmark": "textworld",
+      "condition": "noisy",
+      "seed": 0,
+      "success_rate": 1.0,
+      "success_rate_ci": [
+        1.0,
+        1.0
+      ],
+      "worst_seed_sr": 1.0,
+      "cvar_failure": 0.0,
+      "bottom_10_sr": null,
+      "robustness_gap": null,
+      "avg_cost": 19.13612565445026,
+      "avg_latency": null,
+      "llm_call_rate": 0.0,
+      "safety_failure_rate": null,
+      "ece": 0.23644073634449608,
+      "brier": 0.05656778133189142,
+      "per_task_results": null,
+      "timestamp": "2026-04-25T23:13:34.087382"
+    },
+    {
+      "method": "r2v",
+      "benchmark": "textworld",
+      "condition": "noisy",
+      "seed": 0,
+      "success_rate": 1.0,
+      "success_rate_ci": [
+        1.0,
+        1.0
+      ],
+      "worst_seed_sr": null,
+      "cvar_failure": null,
+      "bottom_10_sr": null,
+      "robustness_gap": null,
+      "avg_cost": 19.13612565445026,
+      "avg_latency": null,
+      "llm_call_rate": 0.0,
+      "safety_failure_rate": null,
+      "ece": null,
+      "brier": null,
+      "per_task_results": null,
+      "timestamp": "2026-04-25T23:13:34.126959"
+    }
+  ],
+  "comparisons": [],
+  "ablations": [],
+  "metadata": {}
+}

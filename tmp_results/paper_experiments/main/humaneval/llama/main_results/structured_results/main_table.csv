@@ -1,0 +1,13 @@
+method,benchmark,condition,seed,success_rate,success_rate_ci,worst_seed_sr,cvar_failure,bottom_10_sr,avg_cost,avg_latency,llm_call_rate,safety_failure_rate,ece,brier
+r2v,humaneval,noisy,0,0.9189,"[0.896, 0.938]",0.9189,0.0811,,10.8919,,0.0000,,0.1121,0.1206
+slm_only,humaneval,noisy,0,0.9189,"[0.896, 0.938]",0.9189,0.0811,,10.8919,,0.0000,,,
+llm_only,humaneval,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,544.5946,,1.0000,,,
+entropy_router,humaneval,noisy,0,0.9189,"[0.896, 0.938]",0.9189,0.0811,,11.4805,,0.0004,,,
+oracle_router,humaneval,noisy,0,1.0000,"[1.000, 1.000]",1.0000,0.0000,,76.2252,,0.0811,,,
+heuristic_router,humaneval,noisy,0,0.9595,"[0.944, 0.973]",0.9595,0.0405,,52.6817,,0.0855,,,
+r2v,humaneval,noisy,0,0.9189,"[0.896, 0.938]",,,,10.8919,,0.0000,,,
+slm_only,humaneval,noisy,0,0.9189,"[0.896, 0.938]",,,,10.8919,,0.0000,,,
+llm_only,humaneval,noisy,0,1.0000,"[1.000, 1.000]",,,,544.5946,,1.0000,,,
+entropy_router,humaneval,noisy,0,0.9189,"[0.896, 0.938]",,,,11.4805,,0.0004,,,
+oracle_router,humaneval,noisy,0,1.0000,"[1.000, 1.000]",,,,76.2252,,0.0811,,,
+heuristic_router,humaneval,noisy,0,0.9595,"[0.944, 0.973]",,,,52.6817,,0.0855,,,

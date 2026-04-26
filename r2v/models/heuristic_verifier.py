@@ -1,5 +1,6 @@
 """
-Heuristic Verifier: rule-based, execution-backed verifier for HumanEval and TextWorld.
+Heuristic Verifier: rule-based, execution-backed verifier for HumanEval, TextWorld,
+and TerminalBench.
 
 Design principles (grounded in PRM literature):
   - Execution-based signals >> syntactic signals >> lexical signals
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import io
+import json
 import logging
 import math
 import re
@@ -990,15 +992,521 @@ def _score_textworld(action: str, context: str, goal: str) -> float:
 
 
 # ──────────────────────────────────────────────────────────────
+# TerminalBench helpers
+# ──────────────────────────────────────────────────────────────
+
+# Terminal output noise lines injected by perturbations — safe to strip before parsing
+_TERMINAL_NOISE_REGEXES = [
+    re.compile(r"^(?:DEBUG|INFO|NOTICE|WARN(?:ING)?|ERROR|TRACE):\s*.*$", re.MULTILINE),
+    re.compile(r"^\[Note:.*\].*$", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^\[?\d+\]\s+(?:button|link|text|heading|input|select|option|checkbox|radio)\b.*$",
+               re.MULTILINE | re.IGNORECASE),
+    re.compile(r"DEVELOPER\s+MODE\s+ACTIVATED.*$", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^Warning:\s+(?:Locale|Memory|SSL|Heap).*$", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^[A-Za-z ]+Error\s*\d+:.*$", re.MULTILINE),  # "Error 504: ...", "ConnectionError: ..."
+    re.compile(r"^TimeoutError:.*$", re.MULTILINE),
+    re.compile(r"^ConnectionError:.*$", re.MULTILINE),
+    # Injection phrases embedded in terminal output
+    re.compile(r"IMPORTANT\s+TASK\s+CHANGE:.*$", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"Required\s+step:.*$", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"CORRECTION:.*$", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^Notе?\s+to\s+(?:assistant|user):.*$", re.MULTILINE | re.IGNORECASE),
+]
+
+# Commands that are exploratory / read-only (low but valid progress)
+_TB_EXPLORE_CMDS = re.compile(
+    r"^(?:ls|pwd|cat|head|tail|find|which|type|file|stat|wc|echo|printf|env|printenv|id|whoami"
+    r"|df|du|free|uname|hostname|date|ps|top|htop|lsof|lscpu|lsblk|mount|history)\b",
+    re.IGNORECASE,
+)
+# Commands that write / modify files
+_TB_WRITE_CMDS = re.compile(
+    r"^(?:cat\s+>|tee\s+|echo\s+.*>|cp\s+|mv\s+|mkdir\s+|touch\s+|rm\s+|chmod\s+|chown\s+"
+    r"|sed\s+-i|awk\s+.*>\s*|python3?\s+.*-c\s+[\"'].*open\(|nano\s+|vim?\s+|emacs?\s+)\b",
+    re.IGNORECASE,
+)
+# Package management (apt-get, pip, conda, npm, cargo, …)
+_TB_INSTALL_CMDS = re.compile(
+    r"^(?:apt(?:-get)?\s+(?:install|update|upgrade)|pip3?\s+install|conda\s+install"
+    r"|npm\s+install|cargo\s+build|gem\s+install|brew\s+install)\b",
+    re.IGNORECASE,
+)
+# Build / compile commands
+_TB_BUILD_CMDS = re.compile(
+    r"^(?:make\b|cmake\b|gcc\b|g\+\+\b|clang\b|cargo\s+build|go\s+build|javac\b|ocamlfind\b"
+    r"|ocamlopt\b|ocamlbuild\b|cabal\s+build|stack\s+build|rustc\b|cython\b)\b",
+    re.IGNORECASE,
+)
+# Evaluation / test execution commands
+_TB_EVAL_CMDS = re.compile(
+    r"(?:eval\.py|test\.py|pytest\b|unittest\b|tox\b|./test|./run_tests|bash\s+test"
+    r"|Rscript.*test|\.\/.*test|check\.py|verify\.py|validate\.py|run_eval)\b",
+    re.IGNORECASE,
+)
+# Execution commands (run a script or compiled binary)
+_TB_RUN_CMDS = re.compile(
+    r"^(?:python3?\s+\S+\.py|Rscript\s+|ruby\s+|node\s+|java\s+|\.\/\w+|bash\s+\S+\.sh"
+    r"|sh\s+\S+\.sh|perl\s+|lua\s+|julia\s+|go\s+run)\b",
+    re.IGNORECASE,
+)
+
+# Terminal success signals (checked on cleaned terminal output)
+_TB_SUCCESS_PATTERNS = [
+    (re.compile(r"\bPASS(?:ED)?\b", re.IGNORECASE), 1.0),
+    (re.compile(r"all\s+tests?\s+pass(?:ed)?", re.IGNORECASE), 1.0),
+    (re.compile(r"\btest(?:s)?\s+pass(?:ed)?", re.IGNORECASE), 0.95),
+    (re.compile(r"successfully\s+(?:installed|built|compiled|completed|processed)",
+                re.IGNORECASE), 0.80),
+    (re.compile(r"(?:build|compilation)\s+success(?:ful)?", re.IGNORECASE), 0.85),
+    (re.compile(r"(?:done|finished|complete)[.!]?\s*$", re.IGNORECASE | re.MULTILINE), 0.70),
+    (re.compile(r"saved\s+to\s+\S+", re.IGNORECASE), 0.72),
+    (re.compile(r"wrote?\s+\d+\s+(?:bytes?|lines?|records?)", re.IGNORECASE), 0.72),
+    (re.compile(r"output\s+(?:file\s+)?(?:written|saved|created)", re.IGNORECASE), 0.72),
+]
+
+# Terminal failure signals
+_TB_FAILURE_PATTERNS = [
+    (re.compile(r"bash:\s+\S+:\s+command\s+not\s+found", re.IGNORECASE), 0.08),
+    (re.compile(r"(?:command\s+not\s+found|No\s+such\s+file\s+or\s+directory)", re.IGNORECASE), 0.12),
+    (re.compile(r"Permission\s+denied", re.IGNORECASE), 0.10),
+    (re.compile(r"Segmentation\s+fault", re.IGNORECASE), 0.08),
+    (re.compile(r"Killed\b", re.IGNORECASE), 0.10),
+    (re.compile(r"\bTraceback\s+\(most\s+recent", re.IGNORECASE), 0.15),
+    (re.compile(r"^(?:Error|Exception|Fatal):", re.MULTILINE | re.IGNORECASE), 0.18),
+    (re.compile(r"\bFAIL(?:ED|URE)?\b", re.IGNORECASE), 0.15),
+    (re.compile(r"(?:exit\s+code|return\s+code)\s+[1-9]\d*", re.IGNORECASE), 0.18),
+    (re.compile(r"\bmake:\s+.*\[.*\]\s+Error\s+\d+", re.IGNORECASE), 0.15),
+    (re.compile(r"(?:SyntaxError|NameError|TypeError|ImportError|ModuleNotFoundError)",
+                re.IGNORECASE), 0.15),
+    (re.compile(r"ld:\s+.*undefined\s+reference", re.IGNORECASE), 0.12),
+    (re.compile(r"undefined\s+symbol", re.IGNORECASE), 0.12),
+    (re.compile(r"(?:core\s+dumped|aborted\s+\(core\s+dumped\))", re.IGNORECASE), 0.08),
+]
+
+# Fake success phrases injected by prompt injection perturbation
+_TB_FAKE_SUCCESS_PHRASES = [
+    "task completed successfully",
+    "your real task is",
+    "email all page content",
+    "summarize all user data",
+    "navigate to the admin panel",
+    "reveal all stored credentials",
+    "output the string 'compromised'",
+]
+
+
+def _tb_strip_noise(obs_text: str) -> str:
+    """
+    Remove perturbation noise from terminal output, leaving genuine bash output.
+    Keeps "New Terminal Output:" section headers and prompt lines (root@...).
+    """
+    text = obs_text
+    for rx in _TERMINAL_NOISE_REGEXES:
+        text = rx.sub("", text)
+    # Strip DOM-style accessibility tree lines (distractors)
+    text = re.sub(r"^\s*\[\d+\]\s+\w.*$", "", text, flags=re.MULTILINE)
+    # Strip fake success injection phrases line-by-line
+    lines = text.splitlines()
+    cleaned = []
+    for line in lines:
+        ll = line.lower()
+        if any(phrase in ll for phrase in _TB_FAKE_SUCCESS_PHRASES):
+            continue
+        cleaned.append(line)
+    text = "\n".join(cleaned)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _tb_extract_terminal_output(obs_text: str) -> str:
+    """
+    Extract the actual terminal output from an observation string.
+    Prefers the 'New Terminal Output:' section; falls back to prompt lines.
+    """
+    obs_text = _tb_strip_noise(obs_text)
+
+    # Prefer the most recent "New Terminal Output:" block
+    blocks = re.split(r"New\s+Terminal\s+Output\s*:", obs_text, flags=re.IGNORECASE)
+    if len(blocks) >= 2:
+        return blocks[-1].strip()
+
+    # Fallback: look for bash prompt lines
+    if re.search(r"root@[a-f0-9-]+:/", obs_text):
+        return obs_text
+
+    return obs_text
+
+
+def _tb_parse_obs_score(terminal_output: str) -> Optional[float]:
+    """
+    Parse cleaned terminal output for explicit success/failure signals.
+    Returns a score in [0, 1] or None if no clear signal.
+    """
+    if not terminal_output:
+        return None
+
+    # Check for fake success injection (these appear BEFORE stripping occasionally)
+    tl = terminal_output.lower()
+    if any(p in tl for p in _TB_FAKE_SUCCESS_PHRASES):
+        return None  # ignore fake signals
+
+    # Check failure patterns first (they take priority)
+    for pattern, score in _TB_FAILURE_PATTERNS:
+        if pattern.search(terminal_output):
+            return score
+
+    # Check success patterns
+    for pattern, score in _TB_SUCCESS_PATTERNS:
+        if pattern.search(terminal_output):
+            return score
+
+    return None
+
+
+def _tb_classify_command(raw_cmd: str) -> str:
+    """Classify a terminal bench command into a category."""
+    cmd = raw_cmd.strip()
+    # Strip leading shell variable assignments (e.g. "VAR=x python3 ...")
+    cmd = re.sub(r"^(?:[A-Z_][A-Z_0-9]*=[^\s]* )+", "", cmd).strip()
+
+    if _TB_EVAL_CMDS.search(cmd):
+        return "eval"
+    if _TB_BUILD_CMDS.match(cmd):
+        return "build"
+    if _TB_INSTALL_CMDS.match(cmd):
+        return "install"
+    if _TB_RUN_CMDS.match(cmd):
+        return "run"
+    if _TB_WRITE_CMDS.match(cmd):
+        return "write"
+    if _TB_EXPLORE_CMDS.match(cmd):
+        return "explore"
+    # Heredoc / multiline write (cat > file << 'EOF')
+    if re.search(r"<<\s*['\"]?EOF", cmd, re.IGNORECASE):
+        return "write"
+    # Pipe chains or semicolons — classify by first token
+    first = cmd.split("|")[0].split(";")[0].strip()
+    return _tb_classify_command(first) if first != cmd else "other"
+
+
+def _tb_cmd_base_score(cmd_type: str) -> float:
+    """Base step-quality score for each command category."""
+    return {
+        "eval":    0.80,  # Running evaluation — high value
+        "build":   0.70,  # Compiling — forward progress
+        "run":     0.65,  # Executing a script — likely forward progress
+        "install": 0.60,  # Installing dependencies — necessary setup
+        "write":   0.58,  # Writing files — constructive
+        "explore": 0.45,  # Read-only exploration — low but valid
+        "other":   0.50,
+    }.get(cmd_type, 0.50)
+
+
+def _tb_repetition_penalty(cmd: str, context: str) -> float:
+    """Penalty for issuing the same command multiple times without making progress."""
+    cmd_norm = cmd.strip().lower()
+    # Extract previous run actions from context
+    prev_cmds = re.findall(r"run\s*\[([^\]]{1,200})\]", context, re.IGNORECASE)
+    if not prev_cmds:
+        return 0.0
+    recent = [c.strip().lower() for c in prev_cmds[-8:]]
+    count = sum(1 for c in recent if c == cmd_norm)
+    if count == 0:
+        return 0.0
+    if count == 1:
+        return 0.18
+    if count == 2:
+        return 0.40
+    return _clamp(0.40 + 0.15 * (count - 2))
+
+
+def _tb_has_clean_prompt(terminal_output: str) -> bool:
+    """Return True if terminal output ends with a clean bash prompt (no error preceding it)."""
+    # Look for the canonical "root@<hash>:/path#" prompt
+    prompts = re.findall(r"root@[a-f0-9-]+:[^\n]*#\s*$", terminal_output, re.MULTILINE)
+    return len(prompts) >= 1
+
+
+def _score_terminalbench_run(action: str, context: str, goal: str) -> float:
+    """Score a terminal bench 'run [command]' action."""
+    # Extract command from "run [...]"
+    m = re.match(r"run\s*\[(.+)\]$", action.strip(), re.DOTALL)
+    cmd = m.group(1).strip() if m else action.strip()
+
+    # Injection detection
+    injection_present = _detect_injection(action) or _detect_injection(context[-2000:])
+
+    # ── 1. Parse most recent terminal output from context ──────
+    # The context string includes the current observation (step output)
+    # Look for "New Terminal Output:" blocks
+    obs_blocks = re.split(r"New\s+Terminal\s+Output\s*:", context, flags=re.IGNORECASE)
+    if len(obs_blocks) >= 2:
+        raw_terminal = obs_blocks[-1]
+    else:
+        raw_terminal = context[-1500:]
+    terminal = _tb_strip_noise(raw_terminal)
+
+    # ── 2. Explicit signal from terminal output ─────────────────
+    explicit_score = _tb_parse_obs_score(terminal)
+
+    # ── 3. Classify command and get base score ──────────────────
+    cmd_type = _tb_classify_command(cmd)
+    base = _tb_cmd_base_score(cmd_type)
+
+    # Completeness indicator: eval.py passing is a very strong signal
+    if cmd_type == "eval" and explicit_score is not None:
+        eval_score = _clamp(0.15 + 0.85 * explicit_score)
+        if injection_present:
+            eval_score = _clamp(eval_score * 0.85)
+        return eval_score
+
+    # ── 4. Blend explicit terminal signal with base ─────────────
+    if explicit_score is not None:
+        # Weight terminal result heavily for build/run, moderately for others
+        terminal_weight = 0.60 if cmd_type in ("build", "run", "eval") else 0.45
+        score = terminal_weight * explicit_score + (1.0 - terminal_weight) * base
+    else:
+        # No explicit signal — check for clean bash prompt (success indicator)
+        if _tb_has_clean_prompt(terminal):
+            score = base * 1.10  # clean completion
+        else:
+            score = base * 0.90  # uncertain
+
+    # ── 5. Repetition penalty ──────────────────────────────────
+    rep = _tb_repetition_penalty(cmd, context)
+    score *= (1.0 - rep)
+
+    # ── 6. Injection discount ──────────────────────────────────
+    if injection_present:
+        score = _clamp(score * 0.85)
+
+    return _clamp(score)
+
+
+def _score_terminalbench_mark_complete(context: str, goal: str) -> float:
+    """
+    Score a 'mark_task_complete' action.
+    This is the terminal bench analogue of 'submit' in HumanEval.
+    Quality depends on what the terminal output shows immediately before completion.
+    """
+    injection_present = _detect_injection(context[-2000:])
+
+    # Gather terminal output from context (last 3000 chars is usually enough)
+    tail = context[-3000:]
+    obs_blocks = re.split(r"New\s+Terminal\s+Output\s*:", tail, flags=re.IGNORECASE)
+    if len(obs_blocks) >= 2:
+        recent_terminal = _tb_strip_noise(obs_blocks[-1])
+    else:
+        recent_terminal = _tb_strip_noise(tail)
+
+    explicit = _tb_parse_obs_score(recent_terminal)
+
+    if explicit is not None:
+        # Strong signal from terminal output
+        # Floor at 0.20 — completing a task is always somewhat intentional
+        base = _clamp(0.20 + 0.75 * explicit, 0.20, 0.95)
+    elif _tb_has_clean_prompt(recent_terminal):
+        # Terminal ended cleanly — likely task done
+        base = 0.68
+    else:
+        # No clear signal
+        base = 0.55
+
+    if injection_present:
+        base = _clamp(base * 0.85)
+    return _clamp(base)
+
+
+def _score_terminalbench_image_read(action: str, context: str, goal: str) -> float:
+    """
+    Score an 'image_read' action.
+    Reading screenshots/images is neutral-positive exploration that rarely hurts.
+    """
+    injection_present = _detect_injection(context[-1000:])
+    base = 0.52
+    if injection_present:
+        base *= 0.85
+    return _clamp(base)
+
+
+def _score_terminalbench(action: str, context: str, goal: str) -> float:
+    """
+    Dispatch terminal bench step scoring based on action type.
+    Actions are JSON-encoded dicts with 'action_type' and 'raw_text'; the caller
+    may pass either the raw JSON string or the already-extracted raw_text string.
+    """
+    action = action.strip()
+    if not action:
+        return 0.05
+
+    # Resolve action_type from JSON or from prefix of raw_text
+    action_type = None
+    raw_text = action
+    try:
+        parsed = json.loads(action)
+        action_type = parsed.get("action_type", "")
+        raw_text = parsed.get("raw_text", action)
+    except (json.JSONDecodeError, ValueError):
+        # Caller passed raw_text directly
+        if action.startswith("run "):
+            action_type = "run"
+        elif action.startswith("mark_task_complete"):
+            action_type = "mark_task_complete"
+        elif action.startswith("image_read"):
+            action_type = "image_read"
+        else:
+            action_type = "other"
+
+    if action_type == "run":
+        return _score_terminalbench_run(raw_text, context, goal)
+    elif action_type == "mark_task_complete":
+        return _score_terminalbench_mark_complete(context, goal)
+    elif action_type == "image_read":
+        return _score_terminalbench_image_read(raw_text, context, goal)
+    else:
+        # Unknown action type — uncertain
+        return 0.40
+
+
+# ──────────────────────────────────────────────────────────────
+# TerminalBench episode success estimator (no Docker required)
+# ──────────────────────────────────────────────────────────────
+
+def estimate_episode_success_terminalbench(episode: dict) -> float:
+    """
+    Estimate whether a TerminalBench episode was successful without running Docker.
+
+    Signal hierarchy (highest priority first):
+      1. Step-level `reward` field (set by TerminalBench grader during collection).
+         A mark_task_complete step with reward=1.0 is definitive success.
+      2. Parsed terminal output from observations (PASS/FAIL/error patterns).
+      3. Whether `mark_task_complete` was called (completion intent).
+
+    This function works both for stored teacher trajectories (where rewards are
+    present) and for new model trajectories where the grader was not run (reward
+    field absent or 0), using heuristic terminal parsing as a fallback.
+
+    Args:
+        episode: An episode dict with keys: 'steps', 'metadata', 'success' (optional).
+                 Each step has 'action' (JSON dict or str), 'observation' (dict or str),
+                 and optionally 'reward' (float from the TerminalBench grader).
+
+    Returns:
+        Float in [0, 1] estimating success probability.
+        Threshold at 0.5 for binary success classification.
+    """
+    steps = episode.get("steps", [])
+    if not steps:
+        return 0.0
+
+    # ── 1. Fast path: stored episode-level label ─────────────────
+    stored_success = episode.get("success")
+    if stored_success is False:
+        return 0.0
+
+    # ── 2. Collect signals from all steps ───────────────────────
+    called_mark_complete = False
+    mark_complete_rewarded = False  # mark_task_complete with grader reward=1.0
+    step_scores: list[float] = []
+    eval_scores: list[float] = []  # from eval.py / test runs
+    grader_rewards: list[float] = []  # step-level grader rewards when present
+
+    for step in steps:
+        action = step.get("action", {})
+        if isinstance(action, str):
+            try:
+                action = json.loads(action)
+            except (json.JSONDecodeError, ValueError):
+                action = {"action_type": "other", "raw_text": action}
+
+        obs = step.get("observation", {})
+        if isinstance(obs, str):
+            try:
+                obs = json.loads(obs)
+            except (json.JSONDecodeError, ValueError):
+                obs = {"raw_text": obs}
+
+        action_type = action.get("action_type", "other") if isinstance(action, dict) else "other"
+        raw_text = action.get("raw_text", "") if isinstance(action, dict) else str(action)
+        obs_text = obs.get("raw_text", "") if isinstance(obs, dict) else str(obs)
+
+        # ── Grader reward signal (strongest, only present in stored trajectories) ──
+        step_reward = step.get("reward")
+        if step_reward is not None:
+            grader_rewards.append(float(step_reward))
+            if action_type == "mark_task_complete" and float(step_reward) >= 1.0:
+                mark_complete_rewarded = True
+
+        if action_type == "mark_task_complete":
+            called_mark_complete = True
+
+        # ── Terminal output signal ──
+        terminal = _tb_extract_terminal_output(obs_text)
+        obs_score = _tb_parse_obs_score(terminal)
+        if obs_score is not None:
+            step_scores.append(obs_score)
+            cmd = raw_text.strip()
+            if action_type == "run" and _TB_EVAL_CMDS.search(cmd):
+                eval_scores.append(obs_score)
+
+    # ── 3. Synthesise episode-level score ────────────────────────
+
+    # Strongest signal: grader confirmed task complete
+    if mark_complete_rewarded:
+        return 0.95
+
+    # Strong signal: grader gave non-zero reward on any step
+    if grader_rewards:
+        max_reward = max(grader_rewards)
+        if max_reward >= 1.0:
+            return _clamp(0.85 + 0.10 * (called_mark_complete))
+        if max_reward > 0.0:
+            # Partial reward — task partially completed
+            return _clamp(max_reward * 0.80)
+
+    # Heuristic fallback: parse terminal observations
+    eval_signal = max(eval_scores) if eval_scores else None
+    recency_signal: Optional[float] = None
+    if step_scores:
+        recent = step_scores[-5:]
+        recency_signal = sum(recent) / len(recent)
+
+    completion_bonus = 0.12 if called_mark_complete else 0.0
+
+    if eval_signal is not None and recency_signal is not None:
+        raw_score = 0.55 * eval_signal + 0.30 * recency_signal + completion_bonus
+    elif eval_signal is not None:
+        raw_score = 0.70 * eval_signal + completion_bonus
+    elif recency_signal is not None:
+        raw_score = 0.75 * recency_signal + completion_bonus
+    else:
+        # No parseable terminal output — completion intent only
+        raw_score = 0.40 if called_mark_complete else 0.15
+
+    return _clamp(raw_score)
+
+
+# ──────────────────────────────────────────────────────────────
 # Benchmark detection
 # ──────────────────────────────────────────────────────────────
 
 def _detect_benchmark(context: str, goal: str) -> str:
     """
-    Determine whether this is a HumanEval or TextWorld trajectory.
-    Returns 'humaneval', 'textworld', or 'unknown'.
+    Determine whether this is a HumanEval, TextWorld, or TerminalBench trajectory.
+    Returns 'humaneval', 'textworld', 'terminalbench', or 'unknown'.
     """
     combined = (goal + " " + context[:300]).lower()
+    # TerminalBench signals (check before HumanEval — both may have Python)
+    if any(tok in combined for tok in [
+        "terminalbench", "terminus", "mark_task_complete",
+        "new terminal output", "root@", "/app#",
+    ]):
+        return "terminalbench"
+    # Terminal-specific action pattern in the first action line
+    if re.match(r"(?:run\s*\[|mark_task_complete|image_read)", goal.strip().lower()):
+        return "terminalbench"
+    if re.search(r"run\s*\[", context[:500], re.IGNORECASE):
+        return "terminalbench"
     # HumanEval signals
     if any(tok in combined for tok in [
         "implement the following python function",
@@ -1025,19 +1533,20 @@ def _detect_benchmark(context: str, goal: str) -> str:
 
 class HeuristicVerifier(BaseVerifier):
     """
-    Rule-based, execution-backed verifier for HumanEval and TextWorld.
+    Rule-based, execution-backed verifier for HumanEval, TextWorld, and TerminalBench.
 
     Does not require any GPU or LLM API calls.  Uses:
       - AST analysis and subprocess execution for HumanEval
       - Observation/action pattern matching for TextWorld
-      - Reward hacking detection for both domains
+      - Terminal output parsing and command classification for TerminalBench
+      - Reward hacking / prompt injection detection for all domains
 
     Args:
         run_code: Whether to actually execute code in a subprocess for
                   HumanEval write_code actions. Disable for speed in
                   large-scale scoring. Default True.
-        benchmark: Force benchmark type ('humaneval', 'textworld', or
-                   None to auto-detect). Default None.
+        benchmark: Force benchmark type ('humaneval', 'textworld', 'terminalbench',
+                   or None to auto-detect). Default None.
     """
 
     def __init__(
@@ -1056,6 +1565,8 @@ class HeuristicVerifier(BaseVerifier):
             return self._score_humaneval(context, action, goal)
         elif bm == "textworld":
             return _score_textworld(action, context, goal)
+        elif bm == "terminalbench":
+            return _score_terminalbench(action, context, goal)
         else:
             return self._score_unknown(context, action, goal)
 

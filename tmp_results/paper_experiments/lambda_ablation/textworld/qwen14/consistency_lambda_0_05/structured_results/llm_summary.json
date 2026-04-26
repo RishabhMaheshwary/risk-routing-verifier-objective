@@ -1,0 +1,102 @@
+{
+  "generated_at": "2026-04-25T23:57:15.983135",
+  "num_experiments": 1,
+  "main_results": [
+    {
+      "method": "r2v",
+      "benchmark": "textworld",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 0.9293333333333333,
+      "std_sr": 0.0,
+      "min_sr": 0.9293333333333333,
+      "max_sr": 0.9293333333333333,
+      "avg_cost": 176.348,
+      "avg_safety_failure_rate": null
+    },
+    {
+      "method": "slm_only",
+      "benchmark": "textworld",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 0.6473333333333333,
+      "std_sr": 0.0,
+      "min_sr": 0.6473333333333333,
+      "max_sr": 0.6473333333333333,
+      "avg_cost": 17.0,
+      "avg_safety_failure_rate": null
+    },
+    {
+      "method": "llm_only",
+      "benchmark": "textworld",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 1.0,
+      "std_sr": 0.0,
+      "min_sr": 1.0,
+      "max_sr": 1.0,
+      "avg_cost": 850.0,
+      "avg_safety_failure_rate": null
+    },
+    {
+      "method": "entropy_router",
+      "benchmark": "textworld",
+      "condition": "noisy",
+      "num_seeds": 2,
+      "mean_sr": 0.68,
+      "std_sr": 0.0,
+      "min_sr": 0.68,
+      "max_sr": 0.68,
+      "avg_cost": 20.005333333333333,
+      "avg_safety_failure_rate": null
+    }
+  ],
+  "comparisons": [
+    {
+      "method_a": "r2v",
+      "method_b": "slm_only",
+      "metric": "success_rate",
+      "benchmark": "textworld",
+      "difference": 0.28200000000000003,
+      "ci": [
+        0.26,
+        0.3046833333333333
+      ],
+      "p_value": 0.0,
+      "significant": true
+    },
+    {
+      "method_a": "r2v",
+      "method_b": "llm_only",
+      "metric": "success_rate",
+      "benchmark": "textworld",
+      "difference": -0.07066666666666666,
+      "ci": [
+        -0.08466666666666667,
+        -0.05731666666666668
+      ],
+      "p_value": 0.0,
+      "significant": true
+    },
+    {
+      "method_a": "r2v",
+      "method_b": "entropy_router",
+      "metric": "success_rate",
+      "benchmark": "textworld",
+      "difference": 0.2493333333333333,
+      "ci": [
+        0.228,
+        0.27266666666666667
+      ],
+      "p_value": 0.0,
+      "significant": true
+    }
+  ],
+  "ablations": [],
+  "key_findings": [
+    "r2v achieves 92.9% SR on textworld (noisy)",
+    "slm_only achieves 64.7% SR on textworld (noisy)",
+    "llm_only achieves 100.0% SR on textworld (noisy)",
+    "entropy_router achieves 68.0% SR on textworld (noisy)"
+  ]
+}

@@ -14,6 +14,8 @@ Calibration is enforced via Brier score and post-hoc temperature scaling.
 
 from __future__ import annotations
 
+import csv
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -36,25 +38,63 @@ class RouterTrainer:
         train_dataset,
         eval_dataset=None,
         config: dict[str, Any] = None,
+        checkpoint_metadata: dict[str, Any] | None = None,
         output_dir: str = "experiments/checkpoints/router",
     ):
         self.router = router
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.config = config or {}
+        self.checkpoint_metadata = checkpoint_metadata or {}
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.checkpoints_dir = self.output_dir / "checkpoints"
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        self.metrics_jsonl_path = self.output_dir / "metrics_history.jsonl"
+        self.metrics_json_path = self.output_dir / "metrics_history.json"
+        self.metrics_csv_path = self.output_dir / "metrics_history.csv"
+        self.checkpoint_manifest_path = self.output_dir / "checkpoint_manifest.jsonl"
 
         self.epochs = self.config.get("epochs", 20)
         self.batch_size = self.config.get("batch_size", 64)
         self.lr = self.config.get("learning_rate", 1e-3)
         self.weight_decay = self.config.get("weight_decay", 1e-4)
         self.lagrangian_lr = self.config.get("lagrangian_lr", 0.01)
+        self.eval_every_epochs = int(self.config.get("eval_every_epochs", 1))
+        self.checkpoint_every_epochs = int(self.config.get("checkpoint_every_epochs", 1))
+        self.save_optimizer_state = bool(self.config.get("save_optimizer_state", True))
 
         self.loss_fn = RouterLoss(self.config)
         self.temp_scaling = TemperatureScaling(
             num_bins=self.config.get("num_bins", 15)
         )
+
+    @staticmethod
+    def _iter_batches(
+        dataset,
+        batch_size: int,
+        shuffle: bool,
+        device: torch.device,
+    ):
+        """Yield batches by slicing pre-normalised tensors directly.
+
+        Avoids the per-sample Python overhead of DataLoader/__getitem__ when
+        the entire dataset is already in memory as contiguous tensors.
+        The first call moves the dataset tensors to *device* in-place if they
+        are not already there.
+        """
+        n = len(dataset)
+        dataset.to(device)
+        idx = torch.randperm(n, device=device) if shuffle else torch.arange(n, device=device)
+        for start in range(0, n, batch_size):
+            sl = idx[start : start + batch_size]
+            yield {
+                "features":          dataset._features[sl],
+                "label":             dataset._labels[sl],
+                "success":           dataset._success[sl],
+                "perturbation_seed": dataset._seeds[sl],
+                "cost":              dataset._costs[sl],
+            }
 
     def train(self) -> dict[str, Any]:
         """Run router training with Lagrangian dual optimization."""
@@ -62,22 +102,13 @@ class RouterTrainer:
         self.router = self.router.to(device)
         self.router.train()
 
-        train_loader = DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=2,
-            pin_memory=True,
-            drop_last=True,
-        )
-
         eval_loader = None
         if self.eval_dataset:
             eval_loader = DataLoader(
                 self.eval_dataset,
-                batch_size=self.batch_size * 2,
+                batch_size=self.batch_size * 4,
                 shuffle=False,
-                num_workers=2,
+                num_workers=0,
             )
 
         # Separate optimizers for primal (router params) and dual (λ)
@@ -96,14 +127,16 @@ class RouterTrainer:
             primal_optimizer, T_max=self.epochs
         )
 
-        metrics_history = []
+        metrics_history: list[dict[str, Any]] = []
         best_eval_metric = float("inf")
+        best_epoch = -1
+        best_checkpoint_path: str | None = None
 
         for epoch in range(self.epochs):
             epoch_metrics = {}
             num_batches = 0
 
-            for batch in train_loader:
+            for batch in self._iter_batches(self.train_dataset, self.batch_size, True, device):
                 features = batch["features"].to(device)
                 labels = batch["label"].to(device)
                 success = batch["success"].to(device)
@@ -139,23 +172,38 @@ class RouterTrainer:
 
             # Epoch summary
             avg_metrics = {k: v / max(num_batches, 1) for k, v in epoch_metrics.items()}
-            avg_metrics["epoch"] = epoch + 1
-            avg_metrics["lambda"] = self.router.lagrange_multiplier.item()
-            avg_metrics["temperature"] = self.router.temperature.item()
-            metrics_history.append(avg_metrics)
+            epoch_record: dict[str, Any] = {
+                "epoch": epoch + 1,
+                "train_cost_loss": avg_metrics.get("cost_loss", 0.0),
+                "train_robustness_loss": avg_metrics.get("robustness_loss", 0.0),
+                "train_calibration_loss": avg_metrics.get("calibration_loss", 0.0),
+                "train_total_loss": avg_metrics.get("total_loss", 0.0),
+                "train_dual_loss": avg_metrics.get("dual_loss", 0.0),
+                "train_constraint_violation": avg_metrics.get("constraint_violation", 0.0),
+                "lambda": float(self.router.lagrange_multiplier.item()),
+                "temperature": float(self.router.temperature.item()),
+                "lr": float(primal_optimizer.param_groups[0]["lr"]),
+            }
 
             logger.info(
                 f"[Router] Epoch {epoch+1}/{self.epochs} "
-                f"Cost={avg_metrics.get('cost_loss', 0):.4f} "
-                f"Robust={avg_metrics.get('robustness_loss', 0):.4f} "
-                f"Calib={avg_metrics.get('calibration_loss', 0):.4f} "
-                f"λ={avg_metrics['lambda']:.4f} "
-                f"T={avg_metrics['temperature']:.4f}"
+                f"Cost={epoch_record['train_cost_loss']:.4f} "
+                f"Robust={epoch_record['train_robustness_loss']:.4f} "
+                f"Calib={epoch_record['train_calibration_loss']:.4f} "
+                f"λ={epoch_record['lambda']:.4f} "
+                f"T={epoch_record['temperature']:.4f}"
             )
 
             # Evaluation
-            if eval_loader and (epoch + 1) % 5 == 0:
+            if eval_loader and (epoch + 1) % self.eval_every_epochs == 0:
                 eval_metrics = self._evaluate(eval_loader, device)
+                epoch_record.update(
+                    {
+                        "eval_brier": float(eval_metrics["brier"]),
+                        "eval_ece": float(eval_metrics["ece"]),
+                        "eval_accuracy": float(eval_metrics["accuracy"]),
+                    }
+                )
                 logger.info(
                     f"[Router] Eval: ECE={eval_metrics['ece']:.4f} "
                     f"Brier={eval_metrics['brier']:.4f} "
@@ -163,18 +211,55 @@ class RouterTrainer:
                 )
                 if eval_metrics["brier"] < best_eval_metric:
                     best_eval_metric = eval_metrics["brier"]
-                    self._save("best")
+                    best_epoch = epoch + 1
+                    best_checkpoint_path = str(self.checkpoints_dir / f"checkpoint_epoch_{epoch+1:03d}.pt")
+                    self._save(
+                        "best",
+                        epoch=epoch + 1,
+                        epoch_metrics=epoch_record,
+                        primal_optimizer=primal_optimizer,
+                        dual_optimizer=dual_optimizer,
+                        scheduler=scheduler,
+                    )
+
+            metrics_history.append(epoch_record)
+            self._append_metrics_jsonl(epoch_record)
+            self._write_metrics_history(metrics_history)
+
+            if (epoch + 1) % self.checkpoint_every_epochs == 0:
+                self._save(
+                    f"checkpoint_epoch_{epoch+1:03d}",
+                    epoch=epoch + 1,
+                    epoch_metrics=epoch_record,
+                    primal_optimizer=primal_optimizer,
+                    dual_optimizer=dual_optimizer,
+                    scheduler=scheduler,
+                )
 
         # Post-hoc temperature scaling on eval set
         # Skip when router.temperature_scaling=false (no_temp_scaling ablation)
         if eval_loader and self.config.get("temperature_scaling", True):
             self._calibrate(eval_loader, device)
 
-        self._save("final")
+        final_epoch_metrics = metrics_history[-1] if metrics_history else None
+        self._save(
+            "final",
+            epoch=self.epochs,
+            epoch_metrics=final_epoch_metrics,
+            primal_optimizer=primal_optimizer,
+            dual_optimizer=dual_optimizer,
+            scheduler=scheduler,
+        )
 
         return {
             "history": metrics_history,
             "best_eval_brier": best_eval_metric,
+            "best_epoch": best_epoch,
+            "best_checkpoint_path": best_checkpoint_path,
+            "metrics_jsonl": str(self.metrics_jsonl_path),
+            "metrics_json": str(self.metrics_json_path),
+            "metrics_csv": str(self.metrics_csv_path),
+            "checkpoint_manifest": str(self.checkpoint_manifest_path),
         }
 
     @torch.no_grad()
@@ -225,11 +310,72 @@ class RouterTrainer:
 
         logger.info(f"[Router] Post-hoc calibration temperature: {self.temp_scaling.temperature:.4f}")
 
-    def _save(self, name: str):
-        """Save router checkpoint."""
-        save_path = self.output_dir / f"{name}.pt"
-        torch.save({
+    def _append_metrics_jsonl(self, epoch_record: dict[str, Any]) -> None:
+        with open(self.metrics_jsonl_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(epoch_record) + "\n")
+
+    def _write_metrics_history(self, metrics_history: list[dict[str, Any]]) -> None:
+        with open(self.metrics_json_path, "w", encoding="utf-8") as f:
+            json.dump(metrics_history, f, indent=2)
+
+        if not metrics_history:
+            return
+
+        fieldnames: list[str] = sorted(
+            {k for rec in metrics_history for k in rec.keys()}
+        )
+        with open(self.metrics_csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for rec in metrics_history:
+                writer.writerow(rec)
+
+    def _save(
+        self,
+        name: str,
+        *,
+        epoch: int,
+        epoch_metrics: dict[str, Any] | None,
+        primal_optimizer: torch.optim.Optimizer | None = None,
+        dual_optimizer: torch.optim.Optimizer | None = None,
+        scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
+    ):
+        """Save router checkpoint and append to checkpoint manifest."""
+        if name.startswith("checkpoint_epoch_"):
+            save_path = self.checkpoints_dir / f"{name}.pt"
+        else:
+            save_path = self.output_dir / f"{name}.pt"
+
+        payload: dict[str, Any] = {
+            "epoch": epoch,
             "router_state_dict": self.router.state_dict(),
-            "temperature": self.temp_scaling.temperature,
-        }, save_path)
-        logger.info(f"[Router] Saved to {save_path}")
+            "temperature": float(self.temp_scaling.temperature),
+            "router_temperature_parameter": float(self.router.temperature.item()),
+            "lagrange_multiplier": float(self.router.lagrange_multiplier.item()),
+            "config": self.config,
+            "epoch_metrics": epoch_metrics,
+        }
+        payload.update(self.checkpoint_metadata)
+
+        if self.save_optimizer_state:
+            if primal_optimizer is not None:
+                payload["primal_optimizer_state_dict"] = primal_optimizer.state_dict()
+            if dual_optimizer is not None:
+                payload["dual_optimizer_state_dict"] = dual_optimizer.state_dict()
+            if scheduler is not None:
+                payload["scheduler_state_dict"] = scheduler.state_dict()
+
+        torch.save(payload, save_path)
+        logger.info(f"[Router] Saved checkpoint: {save_path}")
+
+        manifest_row = {
+            "name": name,
+            "path": str(save_path),
+            "epoch": epoch,
+            "eval_brier": None if epoch_metrics is None else epoch_metrics.get("eval_brier"),
+            "eval_ece": None if epoch_metrics is None else epoch_metrics.get("eval_ece"),
+            "eval_accuracy": None if epoch_metrics is None else epoch_metrics.get("eval_accuracy"),
+            "train_total_loss": None if epoch_metrics is None else epoch_metrics.get("train_total_loss"),
+        }
+        with open(self.checkpoint_manifest_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(manifest_row) + "\n")

@@ -135,7 +135,7 @@ training:
   # Router training
   router:
     epochs: 20
-    batch_size: 64
+    batch_size: 4096   # large batch: router is a tiny MLP, more samples/step = better GPU utilisation
     learning_rate: 1.0e-3
     weight_decay: 1.0e-4
     robust_objective: cvar  # Options: cvar, worst_case, expected

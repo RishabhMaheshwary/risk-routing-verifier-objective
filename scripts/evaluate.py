@@ -29,12 +29,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import torch
+
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover
+    pd = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -63,9 +69,29 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate R2V-Agent (offline)")
     parser.add_argument("--config", type=str, required=True)
     parser.add_argument("--features", type=str, required=True,
-                        help="Router features JSONL (from generate_router_features.py)")
+                        help="Router features (.jsonl or .parquet/.parquet-dir)")
     parser.add_argument("--trajectories", type=str, default=None,
                         help="Trajectory JSONL for perturbation-seed metadata")
+    parser.add_argument("--split", type=str, default=None,
+                        help="Optional split filter when features include a split column")
+    parser.add_argument("--benchmark-filter", type=str, default=None,
+                        help="Optional benchmark filter for Parquet dataset")
+    parser.add_argument("--model-filter", type=str, default=None,
+                        help="Optional model filter for Parquet dataset")
+    parser.add_argument("--variant-filter", type=str, default=None,
+                        help="Optional variant filter for Parquet dataset")
+    parser.add_argument("--category-filter", type=str, default=None,
+                        help="Optional category filter for Parquet dataset")
+    parser.add_argument(
+        "--feature-transform",
+        type=str,
+        default="none",
+        choices=["none", "no_entropy", "verifier_pseudo_entropy"],
+        help=(
+            "Optional transform over feature vectors before evaluation: "
+            "none | no_entropy | verifier_pseudo_entropy"
+        ),
+    )
     parser.add_argument("--router-path", type=str, default=None,
                         help="Path to router_final.pt checkpoint")
     parser.add_argument("--output", type=str, required=True)
@@ -94,6 +120,10 @@ def parse_args():
             "Used for inference-time feature ablation without router retraining."
         ),
     )
+    parser.add_argument(
+        "--device", type=str, default=None,
+        help="Torch device for router inference (default: cuda if available, else cpu)",
+    )
     parser.add_argument("--overrides", nargs="*", default=[])
     return parser.parse_args()
 
@@ -102,17 +132,112 @@ def parse_args():
 # Data loading helpers
 # ============================================================
 
-def load_features(path: str) -> list[dict]:
-    """Load router features JSONL → list of dicts.
+def _is_parquet_source(path: str) -> bool:
+    p = Path(path)
+    return p.is_dir() or p.suffix.lower() in {".parquet", ".pq"}
 
-    Each dict: {features, slm_success, cost, episode_id, step_idx}
-    """
+
+def _normalize_record(record: dict) -> dict:
+    out = dict(record)
+    out["features"] = [float(x) for x in out["features"]]
+    out["slm_success"] = float(out.get("slm_success", 0.0))
+    out["cost"] = float(out.get("cost", 1.0))
+    out["episode_id"] = str(out.get("episode_id", ""))
+    out["step_idx"] = int(out.get("step_idx", 0))
+    if "perturbation_seed" in out and out["perturbation_seed"] is not None:
+        out["perturbation_seed"] = int(out["perturbation_seed"])
+    if out.get("verifier_scores") is not None:
+        out["verifier_scores"] = [float(x) for x in out["verifier_scores"]]
+    else:
+        out["verifier_scores"] = None
+    return out
+
+
+def _softmax_entropy(scores: list[float]) -> float:
+    if not scores:
+        return 0.0
+    arr = [float(s) for s in scores]
+    m = max(arr)
+    exps = [math.exp(x - m) for x in arr]
+    z = sum(exps)
+    if z <= 1e-12:
+        return 0.0
+    probs = [e / z for e in exps]
+    return float(-sum(p * math.log(p + 1e-12) for p in probs))
+
+
+def _compute_verifier_pseudo_entropy(features: list[float], verifier_scores: list[float] | None) -> float:
+    if verifier_scores:
+        return _softmax_entropy(verifier_scores)
+
+    # Fallback approximation from summary stats.
+    if len(features) < 6:
+        return 0.0
+    mean = float(features[2])
+    std = abs(float(features[3]))
+    best = float(features[4])
+    worst = float(features[5])
+    approx_scores = [best, mean + std, mean, mean - std, worst]
+    return _softmax_entropy(approx_scores)
+
+
+def _apply_feature_transform(record: dict, mode: str) -> list[float]:
+    features = record["features"]
+    if mode == "none":
+        return [float(x) for x in features]
+
+    out = [float(x) for x in features]
+    if not out:
+        return out
+
+    if mode == "no_entropy":
+        out[0] = 0.0
+        return out
+
+    if mode == "verifier_pseudo_entropy":
+        out[0] = _compute_verifier_pseudo_entropy(out, record.get("verifier_scores"))
+        return out
+
+    raise ValueError(f"Unknown feature transform mode: {mode}")
+
+
+def load_features(
+    path: str,
+    feature_transform: str = "none",
+    split: str | None = None,
+    benchmark_filter: str | None = None,
+    model_filter: str | None = None,
+    variant_filter: str | None = None,
+    category_filter: str | None = None,
+) -> list[dict]:
+    """Load router features from JSONL or Parquet into normalized record dicts."""
+    if _is_parquet_source(path):
+        if pd is None:
+            raise RuntimeError("pandas is required to read Parquet router datasets")
+        df = pd.read_parquet(path)
+        if split is not None and "split" in df.columns:
+            df = df[df["split"] == split]
+        if benchmark_filter is not None and "benchmark" in df.columns:
+            df = df[df["benchmark"] == benchmark_filter]
+        if model_filter is not None and "model" in df.columns:
+            df = df[df["model"] == model_filter]
+        if variant_filter is not None and "variant" in df.columns:
+            df = df[df["variant"] == variant_filter]
+        if category_filter is not None and "category" in df.columns:
+            df = df[df["category"] == category_filter]
+        out = [_normalize_record(r) for r in df.to_dict(orient="records")]
+        for r in out:
+            r["features"] = _apply_feature_transform(r, feature_transform)
+        return out
+
     records = []
     with open(path) as f:
         for line in f:
             line = line.strip()
             if line:
-                records.append(json.loads(line))
+                r = _normalize_record(json.loads(line))
+                r["features"] = _apply_feature_transform(r, feature_transform)
+                records.append(r)
     return records
 
 
@@ -152,16 +277,31 @@ def group_by_episode(records: list[dict]) -> dict[str, list[dict]]:
     return dict(episodes)
 
 
+def load_episode_metadata_from_records(records: list[dict]) -> dict[str, dict]:
+    """Build per-episode metadata from record-level fields when trajectories are absent."""
+    meta: dict[str, dict] = {}
+    for r in records:
+        eid = r.get("episode_id")
+        if not eid:
+            continue
+        if eid not in meta:
+            meta[eid] = {
+                "perturbation_seed": int(r.get("perturbation_seed", 0)) if r.get("perturbation_seed") is not None else 0,
+                "perturbation_type": str(r.get("perturbation_type", "unknown")),
+            }
+    return meta
+
+
 # ============================================================
 # Router loading
 # ============================================================
 
-def load_router(router_path: str, cfg) -> tuple[Router, float, np.ndarray, np.ndarray]:
+def load_router(router_path: str, cfg, device: str = "cpu") -> tuple[Router, float, np.ndarray, np.ndarray]:
     """Load trained router from checkpoint.
 
     Returns (router, temperature, feature_mean, feature_std) tuple.
     """
-    ckpt = torch.load(router_path, map_location="cpu", weights_only=False)
+    ckpt = torch.load(router_path, map_location=device, weights_only=False)
     input_dim = ckpt.get("input_dim", 13)
 
     # Reconstruct Router config (same logic as train_router.py)
@@ -177,6 +317,7 @@ def load_router(router_path: str, cfg) -> tuple[Router, float, np.ndarray, np.nd
 
     router = Router(router_config)
     router.load_state_dict(ckpt["router_state_dict"])
+    router.to(device)
     router.eval()
 
     temperature = ckpt.get("temperature", 1.0)
@@ -485,12 +626,21 @@ def main():
 
     # ── Load data (test split only) ──
     logger.info(f"Loading router features from {args.features}...")
-    records = load_features(args.features)
+    records = load_features(
+        args.features,
+        feature_transform=args.feature_transform,
+        split=args.split,
+        benchmark_filter=args.benchmark_filter,
+        model_filter=args.model_filter,
+        variant_filter=args.variant_filter,
+        category_filter=args.category_filter,
+    )
+    logger.info(f"  feature_transform={args.feature_transform}")
     logger.info(f"  {len(records)} step-level records (before split filter)")
 
     # Build test-split episode_id allowlist from trajectories
     test_eids: set[str] | None = None
-    ep_meta = {}
+    ep_meta = load_episode_metadata_from_records(records)
     if args.trajectories:
         logger.info(f"Loading trajectory metadata from {args.trajectories}...")
         splits = load_and_split(
@@ -508,8 +658,13 @@ def main():
         ep_meta = load_episode_metadata(args.trajectories)
         logger.info(f"  {len(ep_meta)} episodes with metadata")
     else:
-        logger.warning("No --trajectories provided; evaluating ALL episodes "
-                       "(no test-split filter).")
+        if args.split and _is_parquet_source(args.features):
+            logger.info(
+                "No --trajectories provided; using split-filtered records from features dataset"
+            )
+        else:
+            logger.warning("No --trajectories provided; evaluating ALL episodes "
+                           "(no test-split filter).")
 
     if test_eids is not None:
         records = [r for r in records if r.get("episode_id") in test_eids]
@@ -520,6 +675,14 @@ def main():
 
     eval_methods = _expand_methods(args.methods, args.router_threshold_sweep)
 
+    # ── Resolve device ──
+    import torch as _torch
+    if args.device is not None:
+        device = args.device
+    else:
+        device = "cuda" if _torch.cuda.is_available() else "cpu"
+    logger.info(f"  Device: {device}")
+
     # ── Load router (if evaluating R2V) ──
     router, temperature = None, 1.0
     feature_mean = feature_std = None
@@ -528,7 +691,7 @@ def main():
             logger.error("--router-path required for R2V evaluation")
             sys.exit(1)
         logger.info(f"Loading router from {args.router_path}...")
-        router, temperature, feature_mean, feature_std = load_router(args.router_path, cfg)
+        router, temperature, feature_mean, feature_std = load_router(args.router_path, cfg, device=device)
         logger.info(f"  Temperature: {temperature:.4f}")
         if feature_mean is not None:
             logger.info("  Feature normalization stats loaded from checkpoint")
@@ -537,6 +700,51 @@ def main():
                 "  Threshold sweep: "
                 + ", ".join(f"{t:g}" for t in args.router_threshold_sweep)
             )
+
+    # ── Pre-compute router probabilities for all episodes in one batched pass ──
+    # This replaces the per-episode MLP call with a single vectorised forward,
+    # which is ~N_episodes× faster (GPU or CPU) due to kernel launch amortisation.
+    ep_router_probs: dict[str, np.ndarray] = {}
+    if router is not None and feature_mean is not None:
+        device = next(router.parameters()).device
+        ep_ids_ordered = list(ep_groups.keys())
+        step_counts = [len(ep_groups[eid]) for eid in ep_ids_ordered]
+
+        # Build feature matrix for all steps across all episodes.
+        raw_all = np.vstack([
+            np.array([s["features"] for s in ep_groups[eid]], dtype=np.float32)
+            for eid in ep_ids_ordered
+        ])
+        normed_all = (raw_all - feature_mean) / feature_std
+
+        # Optional feature mask (zeroes out unused feature dimensions).
+        if args.feature_mask is not None:
+            mask = np.zeros(normed_all.shape[1], dtype=np.float32)
+            for idx in args.feature_mask:
+                if idx < normed_all.shape[1]:
+                    mask[idx] = 1.0
+            normed_all = normed_all * mask
+
+        # Single batched inference — chunk to avoid OOM on very large datasets.
+        _CHUNK = 131072
+        all_probs_list = []
+        router.eval()
+        with torch.no_grad():
+            for start in range(0, len(normed_all), _CHUNK):
+                chunk_t = torch.tensor(
+                    normed_all[start : start + _CHUNK], dtype=torch.float32
+                ).to(device)
+                logits = router.mlp(chunk_t).squeeze(-1)
+                probs  = torch.sigmoid(logits / max(temperature, 0.01))
+                all_probs_list.append(probs.cpu().numpy())
+        router.train()
+
+        all_probs_np = np.concatenate(all_probs_list)
+        ptr = 0
+        for eid, cnt in zip(ep_ids_ordered, step_counts):
+            ep_router_probs[eid] = all_probs_np[ptr : ptr + cnt]
+            ptr += cnt
+        logger.info(f"  Batched router inference: {len(normed_all)} steps in one pass")
 
     # ── Evaluate each method ──
     # For robustness analysis, we group episodes by perturbation_seed
@@ -560,12 +768,31 @@ def main():
                     if method_threshold is not None
                     else args.router_threshold
                 )
-                res = evaluate_episode_r2v(
-                    steps, router, temperature,
-                    threshold, cost_slm, cost_llm,
-                    feature_mean, feature_std,
-                    feature_mask=args.feature_mask,
-                )
+                # Re-use pre-computed probabilities; fall back to per-episode
+                # path only if pre-computation was skipped.
+                if ep_id in ep_router_probs:
+                    probs = ep_router_probs[ep_id]
+                    decisions = (probs > threshold).astype(float)
+                    llm_steps = int(decisions.sum())
+                    slm_steps = len(steps) - llm_steps
+                    slm_success = steps[0]["slm_success"]
+                    success = 1.0 if slm_success >= 0.5 else (1.0 if llm_steps > 0 else 0.0)
+                    cost = slm_steps * cost_slm + llm_steps * cost_llm
+                    res = {
+                        "success": success,
+                        "cost": cost,
+                        "llm_call_rate": llm_steps / max(len(steps), 1),
+                        "llm_steps": llm_steps,
+                        "total_steps": len(steps),
+                        "fallback_probs": probs.tolist(),
+                    }
+                else:
+                    res = evaluate_episode_r2v(
+                        steps, router, temperature,
+                        threshold, cost_slm, cost_llm,
+                        feature_mean, feature_std,
+                        feature_mask=args.feature_mask,
+                    )
             elif base_method == "slm_only":
                 res = evaluate_episode_slm_only(steps, cost_slm)
             elif base_method == "llm_only":
@@ -638,15 +865,16 @@ def main():
             # Recalculate with access to raw data
             all_probs = []
             all_labels = []
+            router.eval()
             for ep_id, steps in ep_groups.items():
                 slm_success = steps[0]["slm_success"]
                 raw = np.array([s["features"] for s in steps], dtype=np.float32)
                 normed = (raw - feature_mean) / feature_std
-                features = torch.tensor(normed, dtype=torch.float32)
+                features = torch.tensor(normed, dtype=torch.float32).to(device)
                 with torch.no_grad():
                     logits = router.mlp(features).squeeze(-1)
                     scaled = logits / max(temperature, 0.01)
-                    probs = torch.sigmoid(scaled).numpy()
+                    probs = torch.sigmoid(scaled).cpu().numpy()
                 all_probs.extend(probs.tolist())
                 # Ground truth: should router have routed to LLM?
                 # 1 = yes (SLM failed), 0 = no (SLM succeeded)
