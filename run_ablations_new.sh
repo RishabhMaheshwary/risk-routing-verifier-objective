@@ -208,7 +208,7 @@ echo ""
 ensure_pref_splits() {
     local model_short="$1"
     local bench="$2"
-    local split_dir="updated_data/trajectories/${bench}_noisy"
+    local split_dir="${PREF_SPLIT_DIR:-updated_data/trajectories/${bench}_noisy}"
     local pref_prefix="pref_${model_short}"
     local pref_train="${split_dir}/${pref_prefix}_train.jsonl"
     local pref_val="${split_dir}/${pref_prefix}_val.jsonl"
@@ -226,7 +226,7 @@ ensure_pref_splits() {
 ensure_pref_val_half() {
     local model_short="$1"
     local bench="$2"
-    local split_dir="updated_data/trajectories/${bench}_noisy"
+    local split_dir="${PREF_SPLIT_DIR:-updated_data/trajectories/${bench}_noisy}"
     local pref_prefix="pref_${model_short}"
     local val_half="${split_dir}/${pref_prefix}_val_half.jsonl"
     local val_rest="${split_dir}/${pref_prefix}_val_rest.jsonl"
@@ -278,9 +278,14 @@ for MODEL_SHORT in "${MODELS[@]}"; do
         NOISY_TRAJECTORIES="${NOISY_TRAJECTORIES_OVERRIDE:-updated_data/trajectories/${BENCH}_noisy/trajectories.jsonl}"
 
         # Locate existing BC checkpoint (reused; we do NOT run BC here).
-        BC_CHECKPOINT="outputs/policy/${BENCH}_noisy_bc_${BC_DIR_TAG[${MODEL_SHORT}]}/best"
-        if [[ ! -d "${BC_CHECKPOINT}" ]]; then
-            BC_CHECKPOINT="outputs/policy/${BENCH}_noisy_bc_${BC_DIR_TAG[${MODEL_SHORT}]}/final"
+        # BC_CHECKPOINT_OVERRIDE env var takes precedence (for external checkpoints).
+        if [[ -n "${BC_CHECKPOINT_OVERRIDE:-}" && -d "${BC_CHECKPOINT_OVERRIDE}" ]]; then
+            BC_CHECKPOINT="${BC_CHECKPOINT_OVERRIDE}"
+        else
+            BC_CHECKPOINT="outputs/policy/${BENCH}_noisy_bc_${BC_DIR_TAG[${MODEL_SHORT}]}/best"
+            if [[ ! -d "${BC_CHECKPOINT}" ]]; then
+                BC_CHECKPOINT="outputs/policy/${BENCH}_noisy_bc_${BC_DIR_TAG[${MODEL_SHORT}]}/final"
+            fi
         fi
 
         PREF_PREFIX="pref_${MODEL_SHORT}"
@@ -372,6 +377,17 @@ for MODEL_SHORT in "${MODELS[@]}"; do
                     for ov in ${ABL_OVERRIDES}; do
                         DPO_ARGS+=("${ov}")
                     done
+                    # qwen14 OOM guard: reference model deepcopy (~29 GB) + consistency
+                    # JSD tensors (vocab=151936, ~2-3 GB each) both overflow 80 GB.
+                    # Disable both for qwen14; lambda value is logged but not active.
+                    if [[ "${MODEL_SHORT}" == "qwen14" ]]; then
+                        DPO_ARGS+=("training.preference.use_reference_model=false")
+                        warn "qwen14 OOM guard: use_reference_model=false applied"
+                        if [[ "${ABL_OVERRIDES}" == *"consistency.enabled=true"* ]]; then
+                            DPO_ARGS+=("training.consistency.enabled=false")
+                            warn "qwen14 OOM guard: consistency.enabled=false applied (lambda ablation runs without consistency loss)"
+                        fi
+                    fi
 
                     export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
@@ -497,6 +513,11 @@ for MODEL_SHORT in "${MODELS[@]}"; do
                 export SCORE_ONLY="true"
                 export EXTRA_OVERRIDES="policy.model_name=${MODEL_HF}"
                 export BENCHMARK="${BENCH}"
+                # Terminalbench has no heuristic verifier; fall back to humaneval
+                # verifier with run_code=false (policy features are benchmark-agnostic).
+                if [[ "${BENCH}" != "humaneval" && "${BENCH}" != "textworld" ]]; then
+                    export VERIFIER_OVERRIDE="verifier.mode=heuristic verifier.heuristic.run_code=false verifier.heuristic.benchmark=humaneval"
+                fi
 
                 START_T=$(date +%s)
                 SCORE_RC=0
@@ -517,7 +538,7 @@ for MODEL_SHORT in "${MODELS[@]}"; do
                     fi
                 fi
 
-                unset POLICY_PATH TRAJECTORIES CONFIG OUTPUT K BATCH_SIZE SCORE_ONLY EXTRA_OVERRIDES BENCHMARK
+                unset POLICY_PATH TRAJECTORIES CONFIG OUTPUT K BATCH_SIZE SCORE_ONLY EXTRA_OVERRIDES BENCHMARK VERIFIER_OVERRIDE
             fi
 
             SUCCEEDED_RUNS+=("${MODEL_SHORT}/${BENCH}/${ABL_KEY}")

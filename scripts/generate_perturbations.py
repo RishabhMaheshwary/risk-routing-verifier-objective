@@ -106,6 +106,14 @@ def main():
         logger.info(f"  ✓ {clean_copied} clean episodes written")
 
     # ── Apply perturbations ──────────────────────────────────────
+    # Only perturb successful episodes; failures stay as-is (clean only).
+    success_episodes = [ep for ep in episodes if ep.success]
+    failure_episodes = [ep for ep in episodes if not ep.success]
+    logger.info(
+        f"Success: {len(success_episodes)}, Failure: {len(failure_episodes)} "
+        f"— perturbing only successes"
+    )
+
     total_perturbed = 0
     t0 = time.time()
 
@@ -113,16 +121,17 @@ def main():
         logger.info(f"=== Perturbation seed {seed} ===")
         seed_count = 0
 
-        for i, episode in enumerate(episodes):
+        for i, episode in enumerate(success_episodes):
             perturbed = pipeline.perturb_episode(episode, seed=seed)
             # Give the perturbed episode a unique ID
             perturbed.episode_id = f"{episode.episode_id}_perturbed_seed{seed}"
+            # Perturbed trajectories keep original success label
             output_store.save_episode(perturbed)
             seed_count += 1
             total_perturbed += 1
 
             if (i + 1) % 100 == 0:
-                logger.info(f"  [{i+1}/{len(episodes)}] episodes perturbed")
+                logger.info(f"  [{i+1}/{len(success_episodes)}] episodes perturbed")
 
         logger.info(f"  Seed {seed}: {seed_count} perturbed episodes")
 

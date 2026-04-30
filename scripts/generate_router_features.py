@@ -38,8 +38,14 @@ Features extracted per decision point (15-dim):
 - Benchmark one-hot and perturbation one-hot are currently commented out
     (former indices 15-23 in the 24-dim schema)
 """
-
 from __future__ import annotations
+
+import os
+# Fix FlashInfer GLIBCXX mismatch: system libstdc++ has GLIBCXX_3.4.32,
+# anaconda only has 3.4.26. Preload system lib so cached .so can load.
+# CUDA_HOME needed by FlashInfer's get_cuda_path() to find nvcc for JIT rebuild.
+os.environ["LD_PRELOAD"] = "/usr/lib/x86_64-linux-gnu/libstdc++.so.6"
+os.environ["CUDA_HOME"] = "/mnt/queue4/rishabh/risk-routing-verifier-objective/cuda_home"
 
 import argparse
 import glob
@@ -329,6 +335,12 @@ def _init_vllm_backend(policy_cfg: dict, policy_path: str, logger):
         "trust_remote_code": True,
         "gpu_memory_utilization": float(os.environ.get("VLLM_GPU_MEM_UTIL", "0.75")),
     }
+
+    # Cap max_model_len to avoid KV-cache OOM on models with large default
+    # context (e.g. deepseek 65536).  Router features only need short seqs.
+    max_model_len = os.environ.get("VLLM_MAX_MODEL_LEN")
+    if max_model_len:
+        llm_kwargs["max_model_len"] = int(max_model_len)
 
     if is_lora_adapter:
         base_model = str(policy_cfg.get("model_name", "")).strip()
@@ -1236,12 +1248,19 @@ def _run_batches_two_phase(
             if line_idx < start_batch:
                 continue
 
+            cache_line = cache_line.strip()
+            if not cache_line:
+                continue
+            try:
+                cache_entry = json.loads(cache_line)
+            except json.JSONDecodeError:
+                continue
+
             batch_idx = line_idx
             bs = batch_idx * args.batch_size
             be = min(bs + args.batch_size, len(all_items))
             batch = all_items[bs:be]
 
-            cache_entry = json.loads(cache_line)
             all_candidates = cache_entry["candidates"]
             entropies = cache_entry["entropies"]
 

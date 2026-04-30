@@ -16,6 +16,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PYTHON="${PROJECT_DIR}/.venv/bin/python"
+
 # ── Configurable knobs ────────────────────────────────────────
 POLICY_PATH="${POLICY_PATH:-outputs/policy/humaneval_noisy_dpo/final}"
 TRAJECTORIES="${TRAJECTORIES:-data/trajectories/humaneval_noisy/trajectories.jsonl}"
@@ -77,9 +81,9 @@ else
 fi
 
 # 4. GPU
-if python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
-    GPU_NAME=$(python -c "import torch; print(torch.cuda.get_device_name(0))")
-    GPU_MEM=$(python -c "import torch; print(f'{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB')")
+if $PYTHON -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+    GPU_NAME=$($PYTHON -c "import torch; print(torch.cuda.get_device_name(0))")
+    GPU_MEM=$($PYTHON -c "import torch; print(f'{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB')")
     ok "GPU: ${GPU_NAME} (${GPU_MEM})"
 else
     warn "No GPU detected — will be extremely slow"
@@ -152,7 +156,7 @@ EXTRA_OVERRIDES="${EXTRA_OVERRIDES:-}"
 
 # ── Sanity probe: load 1 trajectory and print stats ──────────
 header "Trajectory sanity check"
-python -c "
+$PYTHON -c "
 import json, sys
 from collections import Counter
 
@@ -194,7 +198,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
     if [[ "$SCORE_ONLY" == "true" ]]; then
         echo "# Sequential CPU score-only (${NUM_SCORE_SHARDS} cache shard(s), stdout only):"
         for ((s = 0; s < NUM_SCORE_SHARDS; s++)); do
-            echo "python scripts/generate_router_features.py \\"
+            echo "$PYTHON scripts/generate_router_features.py \\"
             [[ "${ROUTER_NO_RESUME:-}" == "true" ]] && echo "    --no-resume \\"
             echo "    --config $CONFIG \\"
             echo "    --policy-path $POLICY_PATH \\"
@@ -212,7 +216,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
             echo "python scripts/generate_router_features.py --merge --output \"$OUTPUT\""
         fi
     else
-        echo "python scripts/generate_router_features.py \\"
+        echo "$PYTHON scripts/generate_router_features.py \\"
         [[ "$GENERATE_ONLY" == "true" ]] && echo "    --generate-only \\"
         echo "    --config $CONFIG \\"
         echo "    --policy-path $POLICY_PATH \\"
@@ -245,7 +249,7 @@ if [[ "$SCORE_ONLY" == "true" ]]; then
     info "Score-only: running ${NUM_SCORE_SHARDS} scorer(s) sequentially on CPU (single log stream)"
     for ((s = 0; s < NUM_SCORE_SHARDS; s++)); do
         info "── Scoring cache shard ${s}/${NUM_SCORE_SHARDS} (shard-id ${s}) ──"
-        python scripts/generate_router_features.py \
+        $PYTHON scripts/generate_router_features.py \
             "${RESUME_FLAG[@]}" \
             --config "$CONFIG" \
             --policy-path "$POLICY_PATH" \
@@ -263,7 +267,7 @@ if [[ "$SCORE_ONLY" == "true" ]]; then
     done
     if (( NUM_SCORE_SHARDS > 1 )); then
         info "Merging per-shard feature files → $OUTPUT"
-        python scripts/generate_router_features.py --merge --output "$OUTPUT"
+        $PYTHON scripts/generate_router_features.py --merge --output "$OUTPUT"
     fi
 elif [[ "$NUM_GPUS" -gt 1 ]]; then
     info "Multi-GPU mode: ${NUM_GPUS} workers"
@@ -283,10 +287,10 @@ elif [[ "$NUM_GPUS" -gt 1 ]]; then
 
     if [[ "$GENERATE_ONLY" != "true" ]]; then
         info "Merging shards..."
-        python scripts/generate_router_features.py --merge --output "$OUTPUT"
+        $PYTHON scripts/generate_router_features.py --merge --output "$OUTPUT"
     fi
 else
-    python scripts/generate_router_features.py \
+    $PYTHON scripts/generate_router_features.py \
         "${RESUME_FLAG[@]}" \
         --config "$CONFIG" \
         --policy-path "$POLICY_PATH" \
@@ -307,6 +311,27 @@ MINUTES=$(( ELAPSED / 60 ))
 SECONDS_REMAINING=$(( ELAPSED % 60 ))
 
 # ── Post-run analysis ─────────────────────────────────────────
+# Generate-only: output is *.gen_cache.jsonl files, not the final jsonl.
+# Nothing to analyse here; caller (run_ablations_new.sh) will do score-only next.
+if [[ "$GENERATE_ONLY" == "true" ]]; then
+    ok "Generate-only phase complete. Gen-cache shards are ready for score-only."
+    exit 0
+fi
+
+# Fallback: detect generate-only by presence of shard cache files and absence
+# of final output.  Handles cases where GENERATE_ONLY env var is not propagated
+# correctly through pipe subshells (e.g. when called via run_cmd ... | tee).
+_OUT_DIR="$(dirname "$OUTPUT")"
+_OUT_STEM="$(basename "$OUTPUT" .jsonl)"
+shopt -s nullglob
+_SHARD_CACHES=( "${_OUT_DIR}/${_OUT_STEM}.shard_"*.gen_cache.jsonl )
+shopt -u nullglob
+if [[ ${#_SHARD_CACHES[@]} -gt 0 && ! -f "$OUTPUT" ]]; then
+    ok "Generate-only detected (${#_SHARD_CACHES[@]} cache shard(s) present, no final output yet)."
+    exit 0
+fi
+unset _OUT_DIR _OUT_STEM _SHARD_CACHES
+
 header "Post-run analysis"
 
 if [[ ! -f "$OUTPUT" ]]; then
@@ -317,7 +342,7 @@ fi
 TOTAL_RECORDS=$(wc -l < "$OUTPUT")
 ok "Generated ${TOTAL_RECORDS} feature records in ${MINUTES}m ${SECONDS_REMAINING}s"
 
-python -c "
+$PYTHON -c "
 import json, sys
 import numpy as np
 

@@ -611,6 +611,7 @@ if should_run 4; then
 
     VERIFIER_OVERRIDE="verifier.mode=heuristic verifier.heuristic.run_code=true verifier.heuristic.benchmark=${BENCHMARK}"
 
+    export VERIFIER_OVERRIDE
     export POLICY_PATH="${DPO_CHECKPOINT}"
     export TRAJECTORIES="${NOISY_TRAJECTORIES}"
     export CONFIG="${CONFIG_NOISY}"
